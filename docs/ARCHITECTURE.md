@@ -66,7 +66,7 @@
 | runner | `scripts/auto-truncate-run.ps1` | 校验→关应用→切→验证→重启；退出码 0/2/3/4/5/6 | **宿主外** |
 | CLI | `scripts/truncate-cli.mjs` | 无工具层的最小切口；自带 live 拒绝 | **宿主外** |
 | doctor | `scripts/longlive-doctor.mjs` | 可选依赖/版本/安装计划；默认只读 | **宿主外** |
-| 面板 | `@jjh32456/dsh-longlive-panel@0.2.5` | 六层视图/截断记录/过滤器决策（未并入，显示样例）/影子记录/常驻 Router，只读 | 独立可选插件 |
+| 面板 | `@jjh32456/dsh-longlive-panel@0.2.6` | 六层视图/截断记录/过滤器决策（未并入，显示样例）/影子记录/常驻 Router，只读 | 独立可选插件 |
 | 校验器 | `<tools-dir>\ops\tools\verify-truncation.mjs`（本机示例，不在包内） | V1–V7 结构验收；不写不修 | **宿主外** |
 
 ---

@@ -713,7 +713,16 @@ async function buildSummary(cfg) {
     if (!row || typeof row !== 'object') continue
     live.push(normalizeLive(row, f.name, now))
   }
-  live.sort((a, b) => (b.heartbeatAgeMs ?? 1e15) - (a.heartbeatAgeMs ?? 1e15))
+  // 活体行顺序：运行中 → 空闲 → 其它活动态 → 已归档（dead）最后；同组内心跳越新越靠前。
+  // 旧实现按心跳从旧到新，已归档行最长，把正在跑的会话挤到表格底部（2026-11-06 用户反馈）。
+  live.sort((a, b) => {
+    const rank = liveStateRank(a.state) - liveStateRank(b.state)
+    if (rank !== 0) return rank
+    const ageA = liveAgeSortKey(a.heartbeatAgeMs)
+    const ageB = liveAgeSortKey(b.heartbeatAgeMs)
+    if (ageA !== ageB) return ageA < ageB ? -1 : 1
+    return String(a.sessionId).localeCompare(String(b.sessionId))
+  })
 
   // 孤儿行：活体登记还在，但对应会话目录里没有 session.v4.jsonl.zstd。
   // 扫描被截断或 sessionsRoot 不可读时不猜，sessionFile 置 null，界面不标「无会话文件」。
@@ -834,6 +843,20 @@ function normalizeLive(row, fileName, now) {
     } : null,
     encodingWarning: false,
   }
+}
+
+// 活体行排序口径（面板「六层视图」用）：先看是不是活着，再看心跳新旧。
+// running 最上，idle 次之，已归档（dead）永远最后；同档内心跳越新越靠前。
+const LIVE_STATE_RANK = { running: 0, idle: 1, blocked: 2, waiting: 3, stale: 4, corrupt: 5 }
+
+function liveStateRank(state) {
+  const rank = LIVE_STATE_RANK[state]
+  if (rank != null) return rank
+  return state === 'dead' ? 9 : 6
+}
+
+function liveAgeSortKey(ageMs) {
+  return Number.isFinite(Number(ageMs)) ? Number(ageMs) : Number.POSITIVE_INFINITY
 }
 
 // ---------------------------------------------------------------------------

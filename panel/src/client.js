@@ -320,6 +320,36 @@ window.__ModuleLoader__.load({
     // 状态词只有这一份显示映射：字段名仍是 running/stale/dead/corrupt，界面上不出现「死」。
     const STATE_LABEL = { running: '运行中', idle: '空闲', stale: '休眠', dead: '已归档', corrupt: '损坏', blocked: '阻塞', waiting: '等待' }
     const STATE_TONE = { running: 'ok', idle: 'mute', stale: 'warn', dead: 'mute', corrupt: 'bad', blocked: 'warn', waiting: 'mute' }
+
+    // 活体行的显示顺序：运行中最上，空闲次之，其它活动态再往后，已归档（dead）永远最后。
+    // 旧顺序按心跳从旧到新排，已归档行最长，会把正在跑/空闲的会话挤到表格下面（2026-11-06 用户当场指出）。
+    const LIVE_STATE_RANK = { running: 0, idle: 1, blocked: 2, waiting: 3, stale: 4, corrupt: 5 }
+    function liveStateRank(state) {
+      const rank = LIVE_STATE_RANK[state]
+      if (rank != null) return rank
+      return state === 'dead' ? 9 : 6
+    }
+    function liveAgeMs(row) {
+      const age = row && row.heartbeatAgeMs
+      return Number.isFinite(Number(age)) ? Number(age) : Number.POSITIVE_INFINITY
+    }
+    // 先按状态档位，再按心跳（越新越靠前），最后按 sessionId 兜底，保证每次刷新的顺序一致。
+    function sortLiveRows(rows) {
+      const list = Array.isArray(rows) ? rows.slice() : []
+      return list.sort((a, b) => {
+        const rank = liveStateRank(a && a.state) - liveStateRank(b && b.state)
+        if (rank !== 0) return rank
+        const ageA = liveAgeMs(a)
+        const ageB = liveAgeMs(b)
+        if (ageA !== ageB) {
+          if (!Number.isFinite(ageA)) return 1
+          if (!Number.isFinite(ageB)) return -1
+          return ageA - ageB
+        }
+        return String((a && a.sessionId) || '').localeCompare(String((b && b.sessionId) || ''))
+      })
+    }
+
     const ACTION_TONE = { allow: 'ok', ask: 'warn', deny: 'bad' }
     const TARGET_LABEL = { remember: '记住', archive_only: '只归档', human: '等人判', local_only: '只留本地' }
 
@@ -418,6 +448,14 @@ window.__ModuleLoader__.load({
 .llp .section{display:flex;flex-direction:column;gap:10px;min-width:0}
 .llp .section>h2{margin:0;font-size:13px;font-weight:600;color:var(--llp-muted);letter-spacing:.02em;display:flex;align-items:center;gap:8px}
 .llp .empty{border:1px dashed var(--llp-border);border-radius:10px;padding:26px 18px;text-align:center;color:var(--llp-muted);font-size:12.5px}
+.llp .fold{border:1px solid var(--llp-border);border-radius:10px;min-width:0}
+.llp .fold>summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;cursor:pointer;list-style:none;padding:9px 12px;border-radius:10px;user-select:none}
+.llp .fold>summary::-webkit-details-marker{display:none}
+.llp .fold>summary::before{content:'▸';color:var(--llp-muted);font-size:11px;line-height:1;flex:none}
+.llp .fold[open]>summary::before{content:'▾'}
+.llp .fold>summary:hover{background:var(--llp-soft)}
+.llp .fold[open]>summary{border-bottom:1px solid var(--llp-border);border-radius:10px 10px 0 0;background:var(--llp-soft)}
+.llp .fold>.foldbody{padding:10px 12px 0;overflow-x:auto}
 .llp .metrics{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
 .llp .metric{border:1px solid var(--llp-border);border-radius:9px;padding:10px 12px}
 .llp .metric b{display:block;font-size:19px;font-weight:650;line-height:1.2;font-variant-numeric:tabular-nums}
@@ -515,8 +553,8 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'grid' }, cards)
     }
 
-    function LiveTable({ rows }) {
-      if (!rows || !rows.length) return h('div', { className: 'empty' }, '没有活体心跳行（.longlive/live/*.json 为空）')
+    function LiveTable({ rows, emptyText }) {
+      if (!rows || !rows.length) return h('div', { className: 'empty' }, emptyText || '没有活体心跳行（.longlive/live/*.json 为空）')
       const body = rows.map((r) => h('tr', { key: r.sessionId }, [
         h('td', { key: 'id' }, [
           h('div', { className: 'mono', key: 'a' }, r.shortId || r.sessionId),
@@ -543,14 +581,27 @@ window.__ModuleLoader__.load({
     function PalaceTab({ summary, source }) {
       const badge = h('span', { className: `chip ${source === 'live' ? 'solid' : 'sample'}` }, source === 'live' ? '实时' : '样例')
       const warnings = (summary.warnings || []).map((w) => h('span', { key: w.code, className: 'chip warn' }, w.code))
+      // 先排好序再分两组：活动行直接展开，已归档行（心跳停了）折起来，别让历史把当下挤下去。
+      const liveRows = sortLiveRows(summary.live)
+      const activeRows = liveRows.filter((r) => !r || r.state !== 'dead')
+      const archivedRows = liveRows.filter((r) => r && r.state === 'dead')
       return h(React.Fragment, null, [
         h('section', { className: 'section', key: 'layers' }, [
           h('h2', null, ['六层', badge]),
           h(LayerGrid, { layers: summary.layers || [] }),
         ]),
         h('section', { className: 'section', key: 'live' }, [
-          h('h2', null, ['活体心跳', h('span', { className: 'chip', key: 'c' }, `${(summary.live || []).length} 行`)]),
-          h(LiveTable, { rows: summary.live || [] }),
+          h('h2', null, ['活体心跳', h('span', { className: 'chip', key: 'c' }, `${activeRows.length} 个活动`)]),
+          h(LiveTable, { rows: activeRows, emptyText: '当前没有运行中或空闲的会话' }),
+          archivedRows.length
+            ? h('details', { className: 'fold', key: 'archived' }, [
+              h('summary', null, [
+                h('span', { className: 'chip', key: 'c' }, `已归档 ${archivedRows.length} 行`),
+                h('span', { className: 'snippet', key: 'hint' }, '心跳已停（超过 4×TTL），默认折叠；点开看明细'),
+              ]),
+              h('div', { className: 'foldbody', key: 'body' }, h(LiveTable, { rows: archivedRows })),
+            ])
+            : null,
         ]),
         h('div', { className: 'foot', key: 'foot' }, [
           h('span', { key: 'g' }, `刷新于 ${fmtTime(summary.generatedAt)}`),
@@ -1486,7 +1537,7 @@ window.__ModuleLoader__.load({
     exports.apply = apply
     exports.inject = inject
     // 辅助入口只给回归测试用，宿主不消费
-    exports.__test = { fmtBytes, fmtAge, fmtTime, shortSha, TABS, SAMPLE, components: { Panel, PalaceTab, TruncTab, FilterTab, ShadowTab, RouterTab, RecallTab, HelpTab } }
+    exports.__test = { fmtBytes, fmtAge, fmtTime, shortSha, sortLiveRows, liveStateRank, TABS, SAMPLE, components: { Panel, PalaceTab, TruncTab, FilterTab, ShadowTab, RouterTab, RecallTab, HelpTab } }
 
     return module.exports
   },

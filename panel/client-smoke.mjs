@@ -413,6 +413,72 @@ const sok = (name, cond, extra) => scrollResults.push({ name, pass: Boolean(cond
     `overflow-y:auto=${mainRule.includes('overflow-y:auto')} min-height:0=${mainRule.includes('min-height:0')}｜${compact(mainRule)}`)
 }
 
+// ---------------------------------------------------------------------------
+// 活体行排序 + 已归档折叠：运行中 → 空闲 → 已归档；已归档默认折叠、点开才占版面。
+// 用户 2026-11-06 反馈：已归档行太长，运行中/空闲反被挤到下面。
+// ---------------------------------------------------------------------------
+
+const orderResults = []
+const ook = (name, cond, extra) => orderResults.push({ name, pass: Boolean(cond), extra })
+
+// 组件树的文字要穿过函数组件（LiveTable 是 PalaceTab 里的子组件，collectText 只走
+// host 元素的 children，会漏掉它），所以这里按 React 的物化顺序把函数组件也调一遍。
+function deepText(node, out = []) {
+  if (node == null || node === false) return out
+  if (typeof node === 'string' || typeof node === 'number') {
+    out.push(String(node))
+    return out
+  }
+  if (Array.isArray(node)) {
+    for (const n of node) deepText(n, out)
+    return out
+  }
+  if (typeof node === 'object') {
+    if (typeof node.type === 'function') return deepText(node.type(node.props || {}), out)
+    deepText(node.children, out)
+  }
+  return out
+}
+
+{
+  const liveFixture = [
+    { sessionId: 'session-ddead-0002', shortId: 'ddead', state: 'dead', heartbeatAgeMs: 90000000, ttlMs: 60000, turn: 3, goal: '旧会话一', lastAction: null },
+    { sessionId: 'session-idle1-0003', shortId: 'idle1', state: 'idle', heartbeatAgeMs: 12000, ttlMs: 60000, turn: 9, goal: '空闲会话', lastAction: null },
+    { sessionId: 'session-run11-0001', shortId: 'run11', state: 'running', heartbeatAgeMs: 4000, ttlMs: 60000, turn: 12, goal: '在跑的会话', lastAction: null },
+    { sessionId: 'session-dead2-0002', shortId: 'dead2', state: 'dead', heartbeatAgeMs: 80000000, ttlMs: 60000, turn: 1, goal: '旧会话二', lastAction: null },
+  ]
+
+  // 1) 纯函数：状态档位 + 排序
+  const ranked = client.__test.sortLiveRows(liveFixture).map((r) => r.shortId).join(',')
+  ook('live: sortLiveRows = 运行中 → 空闲 → 已归档（已归档内按心跳新→旧）', ranked === 'run11,idle1,dead2,ddead', ranked)
+  ook('live: liveStateRank(running=0) 且 dead 排最后（9）', client.__test.liveStateRank('running') === 0 && client.__test.liveStateRank('dead') === 9 && client.__test.liveStateRank('idle') === 1, `running=${client.__test.liveStateRank('running')} idle=${client.__test.liveStateRank('idle')} dead=${client.__test.liveStateRank('dead')}`)
+  ook('live: sortLiveRows 不改原数组', liveFixture.map((r) => r.shortId).join(',') === 'ddead,idle1,run11,dead2', liveFixture.map((r) => r.shortId).join(','))
+
+  // 2) 渲染：活动行在上、已归档折进 <details>，默认折叠
+  const liveSummary = { generatedAt: new Date().toISOString(), layers: [], live: liveFixture, warnings: [] }
+  let tree = null
+  let text = ''
+  try {
+    tree = C2.PalaceTab({ summary: liveSummary, source: 'live' })
+    text = deepText(tree).join('\n')
+  } catch (e) {
+    hfail('render: PalaceTab(活体排序 fixture)', e)
+  }
+  const posRun = text.indexOf('run11')
+  const posIdle = text.indexOf('idle1')
+  const posDead = text.indexOf('dead2')
+  ook('live: 渲染顺序 运行中 在 空闲 之前、已归档在最后', posRun >= 0 && posIdle > posRun && posDead > posIdle, `run11=${posRun} idle1=${posIdle} dead2=${posDead}`)
+
+  const fold = findByClass(tree, 'fold')
+  ook('live: 已归档有折叠容器（details.fold）', Boolean(fold) && fold.type === 'details', fold && String(fold.type))
+  ook('live: 已归档默认折叠（details 没有 open）', Boolean(fold) && !('open' in (fold.props || {})) && !fold.props.open, fold ? JSON.stringify(fold.props) : '无折叠节点')
+  const foldText = fold ? deepText(fold).join('\n') : ''
+  ook('live: 折叠里装着两条已归档行', foldText.includes('dead2') && foldText.includes('ddead'), foldText.slice(0, 80))
+  ook('live: 活动区不重复渲染已归档行', text.split('dead2').length - 1 === 1, `dead2 出现 ${text.split('dead2').length - 1} 次`)
+  ook('live: 页头显示活动行数（2 个活动）', text.includes('2 个活动'), text.split('\n').filter((l) => l.includes('活动')).join(' | '))
+  ook('live: 折叠标题写明条数与原因', Boolean(foldText) && foldText.includes('已归档 2 行') && foldText.includes('心跳已停'), foldText.slice(0, 100))
+}
+
 // ---- 输出 ----
 const pass = results.filter((r) => r.pass).length
 const failed = results.filter((r) => !r.pass)
@@ -429,8 +495,14 @@ const helpPass = helpResults.filter((r) => r.pass).length
 const helpFailed = helpResults.length - helpPass
 const scrollPass = scrollResults.filter((r) => r.pass).length
 const scrollFailed = scrollResults.length - scrollPass
+for (const r of orderResults) {
+  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.name}${r.pass ? '' : `  <- ${r.extra}`}`)
+}
+const orderPass = orderResults.filter((r) => r.pass).length
+const orderFailed = orderResults.length - orderPass
 console.log(`\n${pass} PASS · ${failed.length} FAIL`)
 console.log(`新增页签断言：${helpPass} PASS · ${helpFailed} FAIL`)
 console.log(`新增滚动断言：${scrollPass} PASS · ${scrollFailed} FAIL`)
-process.exit(failed.length || helpFailed || scrollFailed ? 1 : 0)
+console.log(`新增活体排序/折叠断言：${orderPass} PASS · ${orderFailed} FAIL`)
+process.exit(failed.length || helpFailed || scrollFailed || orderFailed ? 1 : 0)
 

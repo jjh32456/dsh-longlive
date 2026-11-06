@@ -1,4 +1,4 @@
-﻿# 常见问题（FAQ）
+# 常见问题（FAQ）
 
 **读完你会得到什么**：装完没反应、侧栏不见了、401/404、剪完变少、换电脑、断电、卸载这些最常见的情况，能自己判断「是正常、是没装好，还是该回滚」。
 
@@ -14,7 +14,7 @@
 
 ## 2. 侧栏没有「潜望镜」？
 
-「潜望镜」不是 longlive 本体自带的，它来自独立可选包 `@jjh32456/dsh-longlive-panel@0.2.5`。不装那个包，就永远不会有这个侧栏——这不是故障。
+「潜望镜」不是 longlive 本体自带的，它来自独立可选包 `@jjh32456/dsh-longlive-panel@0.2.6`。不装那个包，就永远不会有这个侧栏——这不是故障。
 
 装了还没有，按顺序查：
 
@@ -86,7 +86,7 @@
 & $DSH plugin --profile desktop remove @jjh32456/dsh-longlive
 ```
 
-然后重启宿主，`list` 里不再出现即成功。卸载**不会**删 `longlive-memory`、会话的 `.bak-YYYYMMDD`、`session.v4.jsonl.zstd.archive/` 和 `.longlive/` 状态文件；要清就自己确认后手动删。面板是独立可选包 `@jjh32456/dsh-longlive-panel@0.2.5`，得单独 `remove @jjh32456/dsh-longlive-panel`。
+然后重启宿主，`list` 里不再出现即成功。卸载**不会**删 `longlive-memory`、会话的 `.bak-YYYYMMDD`、`session.v4.jsonl.zstd.archive/` 和 `.longlive/` 状态文件；要清就自己确认后手动删。面板是独立可选包 `@jjh32456/dsh-longlive-panel@0.2.6`，得单独 `remove @jjh32456/dsh-longlive-panel`。
 
 ## 10. 怎么确认它真的生效了，而不是「装了个寂寞」？
 

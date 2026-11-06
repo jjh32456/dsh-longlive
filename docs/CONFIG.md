@@ -1,4 +1,4 @@
-﻿# CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
+# CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
 适用版本：**1.6.7**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
@@ -200,7 +200,7 @@ d6:
 - **回退**：`d6.enabled: false`（或删除整个 `d6` 块）后重启；没有数据迁移。运行中选择、
   `restrict()` 或组装任一步抛错、或裁剪后工具集为空，也一律回到全量工具面，不阻断会话。
 
-### 1.5 面板（@jjh32456/dsh-longlive-panel@0.2.5，独立可选插件）
+### 1.5 面板（@jjh32456/dsh-longlive-panel@0.2.6，独立可选插件）
 
 面板的配置**不继承**上面插件的 `memoryRoot`，它有自己的两个键（`src/server.js:2103-2109`）：
 
@@ -209,7 +209,7 @@ d6:
 | `memoryRoot` | string | `~/.dsh/longlive-memory` | 目录 | 是 | 面板只读这个目录。插件配了显式根（本机示例 `<memory-root>`）而面板没配 → **面板显示 0 卡**（它读的是默认空目录），不是记忆丢了 |
 | `sessionsRoot` | string | `~/.dsh/sessions` | 目录 | 是 | "截断记录"页读这里的 `<会话目录>/truncate.json`、`truncate-visible.json`（宿主可见对话截断账本）和 `backups.json`（并 stat 账本里记的备份文件）；两份截断账合并后按时间倒序列出。指错 → 该页空白 |
 
-面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。0.2.5 是配套本版的文案与 G1/G2/G4 修复版；本机 `desktop` profile 此前装的是 0.2.4（profile `package.json` 的 `@jjh32456/dsh-longlive-panel` 依赖 + bundles 列表，`node_modules` 有 0.2.4），升级到 0.2.5 的装法/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
+面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。0.2.5 是配套本版的文案与 G1/G2/G4 修复版；0.2.6 在此基础上重排「活体心跳」（运行中 → 空闲 → 已归档，已归档默认折叠）。本机 `desktop` profile 装的是 0.2.5，面板 `src/` 已热更到 0.2.6 内容；升级/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
 
 **1.6.0 新增：插件自带的设置页伴侣**（不是上面的面板包）。`package.json` 的 `./client` +
 `src/ui/*` 在宿主设置页的插件行注册 `plugins.row.config`，标题「久视 · 功能开关」，提供 7 个

@@ -1,9 +1,9 @@
 # 安装 · @jjh32456/dsh-longlive-panel
 
-> **本机现状（2026-11-06 打包时）：0.2.4 已装；本包 0.2.5 只改文案与页签显示顺序，尚未装机。**
+> **本机现状（2026-11-06 21:30）：0.2.5 已装且已发布 npm；本包 0.2.6 = 六层视图活体行重排 + 已归档折叠。**
 > `desktop` profile 的 `package.json` 里
-> `@jjh32456/dsh-longlive-panel` 同时在 `bundles` 与 `dependencies`（`file:C:/dshops/install-1.6.3/packages/jjh32456-dsh-longlive-panel-0.2.4.tgz`），
-> `node_modules/@jjh32456/dsh-longlive-panel` 是 0.2.4，面板路由已挂进宿主。
+> `@jjh32456/dsh-longlive-panel` 同时在 `bundles` 与 `dependencies`（`file:C:/dshops/batch/release-164/out/jjh32456-dsh-longlive-panel-0.2.5.tgz`），
+> `node_modules/@jjh32456/dsh-longlive-panel` 现在是 0.2.5 的包壳 + 0.2.6 的 `src/client.js`、`src/server.js`（热更，客户端已即时生效；正式装机用 0.2.6 的 tgz，重启一次）。
 > 下面既写当前状态，也保留从零安装、验证、卸载的步骤；**改代码/配置后仍需重启宿主**。
 
 面板是**只读**的：八个 GET 路由（六个数据页签取数 + `/cards`、`/card` 的卡片正文），不写文件、
@@ -23,7 +23,8 @@
 | Node | `>= 22.13.0` |
 | 面板入口 | 侧栏「潜望镜」→ 整页七个页签 |
 
-七个页签（按面板从左到右）：**六层视图**（先看这里，确认自己接上了：六层记忆 + 活体心跳）、
+七个页签（按面板从左到右）：**六层视图**（先看这里，确认自己接上了：六层记忆 + 活体心跳；
+活体行按 运行中 → 空闲 → 已归档 排序，已归档默认折叠）、
 **过滤器决策**（`.longlive/filter/decisions-*.jsonl`）、
 **影子记录**（`router-runtime.jsonl`，根目录与 `.longlive/` 两处合并）、
 **常驻 Router**（`.longlive/router/` 的 status / board / proposals，只读窗口）、
@@ -143,7 +144,7 @@ dsh plugin --profile desktop remove @jjh32456/dsh-longlive-panel
 ```powershell
 $node = "C:\Users\Administrator\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 & $node .\self-test.mjs       # 58 PASS · 0 FAIL（造 .fixture，跑完自动删）
-& $node .\client-smoke.mjs    # 25 PASS · 0 FAIL（基线）+ 页签 34 PASS + 滚动 2 PASS
+& $node .\client-smoke.mjs    # 25 PASS · 0 FAIL（基线）+ 页签 34 PASS + 滚动 2 PASS + 活体排序/折叠 10 PASS
 & $node --test gap-fixes.test.mjs  # 6 PASS · 0 FAIL（截断记录合并 / shadowRecords 口径回归）
 ```
 

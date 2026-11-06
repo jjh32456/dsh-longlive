@@ -1,4 +1,4 @@
-﻿# @jjh32456/dsh-longlive（久视）
+# @jjh32456/dsh-longlive（久视）
 
 > 1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；1.6.4 起发布名改为 scoped 包
 > `@jjh32456/dsh-longlive`（npm 包名），显示名仍是「久视」（英文 Longlive）；
@@ -110,7 +110,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
   被裁掉的工具）。打开方式、预算与回退见 [docs/FEATURES.md](docs/FEATURES.md) 和
   [docs/CONFIG.md](docs/CONFIG.md)。
 - 默认记忆目录：`%USERPROFILE%\.dsh\longlive-memory`（首次启动自动创建）。
-- **没有自带界面**。另装可选的只读面板 `@jjh32456/dsh-longlive-panel@0.2.5` 后，侧栏才会出现「潜望镜」，里面有七个页签：六层视图、截断记录、过滤器决策、影子记录、常驻 Router、本轮想起（另有「使用说明」）。面板是独立可选包，不装就没有这个侧栏。
+- **没有自带界面**。另装可选的只读面板 `@jjh32456/dsh-longlive-panel@0.2.6` 后，侧栏才会出现「潜望镜」，里面有七个页签：六层视图、截断记录、过滤器决策、影子记录、常驻 Router、本轮想起（另有「使用说明」）。面板是独立可选包，不装就没有这个侧栏。
 
 ## 第一次使用
 

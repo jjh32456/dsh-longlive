@@ -549,6 +549,8 @@ async function main() {
       for (const k of ['sessionId', 'shortId', 'host', 'state', 'ttlMs', 'goal', 'blockedOn', 'lastAction']) has(running, k, 'live row')
       const dead = b.live.find((x) => x.sessionId === 'session-bbbbbbbb-2222')
       eq(dead.state, 'dead', '三天前心跳应为 dead')
+      eq(b.live[0] && b.live[0].state, 'running', '第一行必须是运行中（已归档不得排在前面）')
+      eq(b.live[b.live.length - 1] && b.live[b.live.length - 1].state, 'dead', '已归档必须排最后')
       return `live=${b.live.map((x) => `${x.shortId}:${x.state}`).join(', ')}`
     })
   }

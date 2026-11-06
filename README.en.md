@@ -1,11 +1,11 @@
-﻿# @jjh32456/dsh-longlive (Longlive)
+# @jjh32456/dsh-longlive (Longlive)
 
 A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back it up, and shrink it safely** before the context window fills up. No standalone UI; no network requests or telemetry in the default configuration (Router / RouterFace / embedding call the provider you configure, only after you enable them).
 ## What you get
 
 - **22 tools** for session health/backup/compaction/truncation, on-demand original-text fetch, memory cards, workers (fan-out is unavailable until `workers.enabled: true`), and the live-session registry.
 - A memory store at `<DSH home>/longlive-memory` (on Windows: `%USERPROFILE%\.dsh\longlive-memory`), created on first start.
-- Optional: the separate read-only panel `@jjh32456/dsh-longlive-panel@0.2.5` adds a sidebar named **潜望镜 (Periscope)**. The plugin itself ships no UI.
+- Optional: the separate read-only panel `@jjh32456/dsh-longlive-panel@0.2.6` adds a sidebar named **潜望镜 (Periscope)**. The plugin itself ships no UI.
 - Optional and **off by default**: `d2.enabled` trims oversized tool output (the full text is archived), `d6.enabled` freezes a per-task tool allowlist and registers `tool_search`. See [docs/FEATURES.md](docs/FEATURES.md) and [docs/CONFIG.md](docs/CONFIG.md) for enabling, budget and rollback.
 
 ## Install (3 commands)

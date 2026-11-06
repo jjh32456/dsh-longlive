@@ -213,7 +213,7 @@ config:
   `superseded`；每会话每日 1 次、全局每日 5 次。
 - **唤醒**：`routerWakeEnabled` 默认 false；只对 idle/waiting 根会话，600s 冷却、每日
   20 次、`recentWakeIds` 去重，写 `wake-ready.jsonl` 交给外部消费。
-- **面板只读**：`@jjh32456/dsh-longlive-panel@0.2.5` 只读 status/board，不做 approve/apply/propose。
+- **面板只读**：`@jjh32456/dsh-longlive-panel@0.2.6` 只读 status/board，不做 approve/apply/propose。
 
 Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/router-1100/` 与
 `test/router-l1-l2.contract.test.mjs`。

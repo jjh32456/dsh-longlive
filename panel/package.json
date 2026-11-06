@@ -1,6 +1,6 @@
 {
   "name": "@jjh32456/dsh-longlive-panel",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "久视（longlive）共享大脑只读面板：先看有没有接上同一个我（六层视图/本轮想起/常驻 Router），再看过滤器决策/影子记录；截断记录是维护页。全只读。",
   "type": "module",
   "main": "src/server.js",

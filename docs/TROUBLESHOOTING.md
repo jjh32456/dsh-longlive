@@ -1,4 +1,4 @@
-﻿# TROUBLESHOOTING.md — 按症状查（1.6.7）
+# TROUBLESHOOTING.md — 按症状查（1.6.7）
 
 用法：先看「症状」，对不上再看「最可能原因」。每条只给**一条**验证命令——先确认判断，再动手。
 「什么时候该停手」比「怎么修」更重要：结构一旦不对，继续重试只会扩大损失。
@@ -43,7 +43,7 @@
 
 **症状**：Web GUI 左侧看不到面板入口。
 
-**最可能原因**：面板是**独立可选包** `@jjh32456/dsh-longlive-panel@0.2.5`，这一轮根本没装；
+**最可能原因**：面板是**独立可选包** `@jjh32456/dsh-longlive-panel@0.2.6`，这一轮根本没装；
 或者只 `plugin add` 了、没加进 profile 的 `dsh.profile.bundles`，bundle patch 不生效；
 或者当前 profile 不是 `desktop`、宿主没重启。
 
@@ -54,7 +54,7 @@
 ```
 
 **修法**：
-1. 安装独立可选包 `@jjh32456/dsh-longlive-panel@0.2.5`（装法见该包的 `INSTALL.md`）；
+1. 安装独立可选包 `@jjh32456/dsh-longlive-panel@0.2.6`（装法见该包的 `INSTALL.md`）；
 2. 在 `$P\package.json` 的 `dsh.profile.bundles` 里加入 `@jjh32456/dsh-longlive-panel`；
 3. 重启宿主，刷新页面。
 （两步缺一不可；只装不加 bundles，patch 不会应用。）
