@@ -347,7 +347,7 @@ cd <插件目录>\scripts
   -RestartDelaySeconds 0
 ```
 
-它做两件事：注册一次性计划任务 `@jjh32456/dsh-longlive-surgery`，然后立刻启动。
+它做两件事：注册一次性计划任务 `dsh-longlive-surgery`，然后立刻启动。
 任务动作是：
 
 ```
@@ -356,7 +356,7 @@ powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy B
 ```
 
 `-WindowStyle Hidden` + 计划任务 = **没有任何用户可点的控制台**。
-看到 `TASK_STARTED @jjh32456/dsh-longlive-surgery` 之后，注册窗口就可以关了；手术已经托管给
+看到 `TASK_STARTED dsh-longlive-surgery` 之后，注册窗口就可以关了；手术已经托管给
 Task Scheduler，关掉注册窗口不会杀它（但也别在 30 秒阅读窗口内去关宿主，那会打断手术）。
 
 | 参数 | 默认 | 含义 |
