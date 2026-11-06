@@ -8,7 +8,7 @@
 
 大概率是正常的。这个插件**没有自带界面**，默认 `mode: "log"` 也只会在后台写一行评估日志，不会弹窗、不会剪东西。
 
-按顺序确认：`dsh plugin --profile desktop list --depth 0` 有 `@jjh32456/dsh-longlive@1.6.5`；doctor 没有硬错误（退出码 0，或只有 engram 缺失导致的 1）；重启后新会话里能数到 22 个工具；聊到超过阈值后，`%USERPROFILE%\.dsh\longlive-memory\.longlive\logs\auto-truncate.log` 才出现评估行（默认阈值 300000，所以短时间内没有是正常的）。
+按顺序确认：`dsh plugin --profile desktop list --depth 0` 有 `@jjh32456/dsh-longlive@1.6.7`；doctor 没有硬错误（退出码 0，或只有 engram 缺失导致的 1）；重启后新会话里能数到 22 个工具；聊到超过阈值后，`%USERPROFILE%\.dsh\longlive-memory\.longlive\logs\auto-truncate.log` 才出现评估行（默认阈值 300000，所以短时间内没有是正常的）。
 
 如果这四样都没有，先看宿主启动 stderr 有没有 `1 entry did not activate`。
 
@@ -92,7 +92,7 @@
 
 四个独立证据，至少看到两个：
 
-1. `plugin list` 显示 `@1.6.5`；
+1. `plugin list` 显示 `@1.6.7`；
 2. doctor 没有硬错误（0，或只有 engram 缺失导致的 1）；
 3. 新会话能调用 `session_health`，返回里有 `sessionPath` / `events` / `visibleMessages`；
 4. 聊到超过阈值后，`auto-truncate.log` 出现评估行（`action` 是 `planned` / `dryrun-planned` / `none` 都算插件在评估）。

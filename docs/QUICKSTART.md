@@ -2,7 +2,7 @@
 
 **读完你会得到什么**：从一台已经装好 DSH 的 Windows 机器出发，装好 longlive，用 `dryrun` 看它「打算怎么剪」，再切到 `request`，最后安全地完成第一次真截断，并且知道怎么退回去。
 
-> 适合谁：第一次拿到 `jjh32456-dsh-longlive-1.6.5.tgz` 的人。全程约 20 分钟，其中真截断那一步应用会自己关闭再打开（VM 实测约 31.5 秒），请挑你不用电脑的时候做。
+> 适合谁：第一次拿到 `jjh32456-dsh-longlive-1.6.7.tgz` 的人。全程约 20 分钟，其中真截断那一步应用会自己关闭再打开（VM 实测约 31.5 秒），请挑你不用电脑的时候做。
 >
 > 本文默认 DSH home 是 `%USERPROFILE%\.dsh`；如果你设过 `DSH_HOME`，把命令里的这段整体换掉。
 
@@ -25,14 +25,14 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 ## 1. 装插件：三条命令
 
 ```powershell
-$TGZ = 'C:/path/jjh32456-dsh-longlive-1.6.5.tgz'   # 换成真实绝对路径
+$TGZ = 'C:/path/jjh32456-dsh-longlive-1.6.7.tgz'   # 换成真实绝对路径
 
 & $DSH plugin --profile desktop add "file:$TGZ"
 & $DSH plugin --profile desktop list --depth 0
 & $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
 
-**你应该看到**：`list` 里出现 `@jjh32456/dsh-longlive@1.6.5`；doctor 打印一张表，最后是「全部可选依赖已启用。」或只有 engram 缺失的提示。
+**你应该看到**：`list` 里出现 `@jjh32456/dsh-longlive@1.6.7`；doctor 打印一张表，最后是「全部可选依赖已启用。」或只有 engram 缺失的提示。
 
 **报错了怎么办**：
 - `ENOENT` → `file:` 后面必须是**真实存在的绝对路径**，用正斜杠；不要把 `~` 写进去。

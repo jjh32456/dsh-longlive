@@ -342,21 +342,31 @@ function roughPointerTokens(text) {
 }
 
 /**
- * Select the oldest whole completed turns that sit outside the retention
- * window. Returns null when no safe cut exists (the common, expected answer).
+ * Select the oldest whole closed turns that sit outside the retention window.
+ * Returns null when no safe cut exists; every such refusal reports a structured
+ * reason through `helpers.onNoPlan` so a silently disabled hot truncate is
+ * observable (the engine logs it once per reason).
  *
- * The host protects surface position 0 when it holds the system prompt: a
- * user/message replacement may not shadow that node. This engine's contract is
- * stronger than the host's: a `system/message` is never part of a cut. The span
- * therefore starts at the first user/assistant node after every leading
- * system node, and a system node anywhere inside a candidate span is a hard
- * right boundary. Checkpoint nodes at the head of the span are folded into the
- * same cut, which keeps exactly one pointer.
+ * The leading run of `system/message` / `developer/message` nodes (the real
+ * system prompt at host-protected position 0) is never moved. A `system/message`
+ * re-injected by a host restart further inside the surface is an archived copy
+ * of that same prompt (host-tolerated inside a replacement range). Checkpoint
+ * nodes at the head of the span are folded into the same cut, which keeps
+ * exactly one pointer.
  */
 export function selectCutPlan(session, options, measurement, helpers = {}) {
   const table = helpers.table ?? turnTable(session);
   const groups = surfaceGroups(session, table, helpers.isCheckpointSource);
-  if (groups.length === 0) return null;
+  const onNoPlan = typeof helpers.onNoPlan === 'function' ? helpers.onNoPlan : null;
+  const noPlan = (reason, detail) => {
+    try {
+      onNoPlan?.({ reason, detail: detail === undefined ? null : detail });
+    } catch {
+      // Diagnostics never break a plan.
+    }
+    return null;
+  };
+  if (groups.length === 0) return noPlan('no-groups');
   const tokens = new Map();
   for (const node of measurement?.nodes ?? []) {
     if (node && typeof node.seq === 'number' && Number.isFinite(node.tokens)) tokens.set(node.seq, node.tokens);
@@ -370,8 +380,9 @@ export function selectCutPlan(session, options, measurement, helpers = {}) {
   };
 
   // Walk backwards until the retained suffix satisfies BOTH limits. A turn
-  // that is not completed is never part of the retained *window*, so it also
-  // cannot be cut; the scan still counts it as a completed-turn boundary stop.
+  // that is not completed counts toward the token budget but never toward the
+  // completed-turn floor, so the retained suffix may temporarily hold a few
+  // extra turns while a closed aborted turn sits inside the window.
   let keptTurns = 0;
   let keptTokens = 0;
   let boundary = -1;
@@ -385,103 +396,160 @@ export function selectCutPlan(session, options, measurement, helpers = {}) {
       break;
     }
   }
-  if (boundary <= 0) return null;
+  if (boundary <= 0) return noPlan('not-enough-turns', { groups: groups.length });
 
   const surfaceNodes = session?.surface?.nodes ?? [];
-  if (surfaceNodes.length === 0) return null;
+  if (surfaceNodes.length === 0) return noPlan('no-surface');
 
-  // Never include a leading system prompt in the replaced span.
-  let startIndex = 0;
-  while (startIndex < surfaceNodes.length
-    && table.bySeq.get(surfaceNodes[startIndex])?.type === 'system/message') {
-    startIndex += 1;
+  // 2026-11-06 1.6.7 hardening — no permanent barrier, no silent zero progress.
+  //
+  // 1.6.6 removed the aborted-turn freeze but treated every group without a
+  // usable turn record as an immovable open group and stopped the span before
+  // it. Three surface shapes then made the planner return null forever even
+  // though whole closed turns older than the retention window existed:
+  //   * a log truncated mid-turn leaves orphan messages at the surface head
+  //     (no turn/start) — a turn===0 group at the head (red team E1);
+  //   * the host appends a user/message between turns — a turn===0 group in
+  //     the middle (red team E3);
+  //   * a turn whose turn/end was lost by log truncation — turn N has no
+  //     endSeq but later turns exist (red team E2).
+  //
+  // Rules now:
+  //   * the whole LEADING run of system/message + developer/message nodes is
+  //     never moved (head instructions; host-protected position 0);
+  //   * a turn===0 group that carries a system/developer node is a head
+  //     instruction zone and stays in place; a turn===0 group of plain messages
+  //     is an orphan prefix and is archived with the cut (recoverable);
+  //   * a group whose turn has no turn/end is the CURRENT turn only when it is
+  //     the last started turn; an earlier turn without turn/end is abandoned
+  //     (the log was truncated inside it) and is cuttable, archived through an
+  //     inferred range up to the next turn/start;
+  //   * the planner skips a blocked head barrier and cuts the next run of
+  //     wholly-cuttable groups; if nothing is cuttable it reports the reason
+  //     through onNoPlan instead of returning null silently.
+  const groupStart = new Array(groups.length);
+  const groupEnd = new Array(groups.length);
+  const groupOfPosition = new Array(surfaceNodes.length);
+  {
+    let cursor = 0;
+    for (let index = 0; index < groups.length; index += 1) {
+      groupStart[index] = cursor;
+      for (let offset = 0; offset < groups[index].seqs.length; offset += 1) groupOfPosition[cursor++] = index;
+      groupEnd[index] = cursor - 1;
+    }
   }
-  // The pointer replaces a user/assistant message, so the first cut node must
-  // be one. A leading developer node is kept in place instead of cut.
+  const typeOfSeq = (seq) => table.bySeq.get(seq)?.type;
+  const isInstructionSeq = (seq) => typeOfSeq(seq) === 'system/message' || typeOfSeq(seq) === 'developer/message';
+  const protectedSeqs = new Set();
+  {
+    let position = 0;
+    while (position < surfaceNodes.length && isInstructionSeq(surfaceNodes[position])) {
+      protectedSeqs.add(surfaceNodes[position]);
+      position += 1;
+    }
+  }
+  const lastStarted = table.turns.length > 0 ? table.turns[table.turns.length - 1] : null;
+  const turnInfoOf = (group) => (group.kind === 'turn' && group.turn !== 0 ? table.byNumber.get(group.turn) : undefined);
+  const isCurrentTurnGroup = (group) => {
+    if (group.kind !== 'turn' || group.turn === 0) return false;
+    const info = table.byNumber.get(group.turn);
+    if (info === undefined) return true;
+    return info.endSeq === null && lastStarted !== null && info.turn === lastStarted.turn;
+  };
+  const isCuttableGroup = (group) => {
+    if (group === undefined) return false;
+    if (group.kind === 'checkpoint') return true;
+    if (group.kind !== 'turn') return false;
+    // A turn===0 group is either an orphan head zone (contains instructions) or
+    // a stray message block between turns; only the latter may be archived.
+    if (group.turn === 0) return !group.seqs.some((seq) => isInstructionSeq(seq));
+    const info = table.byNumber.get(group.turn);
+    if (info === undefined) return false;
+    return !isCurrentTurnGroup(group);
+  };
+  // An abandoned turn (no turn/end, but a later turn/start exists) never got a
+  // closing event; the archive range is inferred up to the next turn/start so
+  // every one of its original events stays recoverable.
+  const resolvedEndSeq = (group) => {
+    const info = table.byNumber.get(group.turn);
+    const lastSurfaceSeq = group.seqs[group.seqs.length - 1];
+    if (info === undefined || !Number.isInteger(info.startSeq)) return lastSurfaceSeq;
+    if (Number.isInteger(info.endSeq)) return info.endSeq;
+    const next = table.turns.find((entry) => Number.isInteger(entry.startSeq) && entry.startSeq > info.startSeq);
+    if (next === undefined) return lastSurfaceSeq;
+    return Math.max(info.startSeq, next.startSeq - 1);
+  };
+
+  // The span starts after the protected head run and on a user/assistant node
+  // (the pointer replaces one); a system copy skipped at the head of a turn
+  // stays outside the span exactly like 1.6.6 — it is never moved out.
+  let startIndex = 0;
+  while (startIndex < surfaceNodes.length && protectedSeqs.has(surfaceNodes[startIndex])) startIndex += 1;
   while (startIndex < surfaceNodes.length) {
-    const type = table.bySeq.get(surfaceNodes[startIndex])?.type;
+    const type = typeOfSeq(surfaceNodes[startIndex]);
     if (type === 'user/message' || type === 'assistant/message') break;
     startIndex += 1;
   }
-  if (startIndex >= surfaceNodes.length) return null;
+  if (startIndex >= surfaceNodes.length) return noPlan('no-span-start');
+  const firstGroup = groupOfPosition[startIndex];
 
-  // The cut prefix is groups[0..boundary); their surface lengths sum to the
-  // last positional index that belongs to the prefix.
-  let endIndex = -1;
-  for (let index = 0; index < boundary; index += 1) endIndex += groups[index].seqs.length;
-
-  // An aborted/unfinished turn is never cut — but it must not freeze every
-  // later cut either. Keep it in place and start the span after the LAST
-  // aborted/unfinished turn in the prefix, so the completed turns that follow
-  // it stay cuttable. (2026-11-06 hotfix: a restart-aborted turn used to make
-  // selectCutPlan return null forever, so automatic hot-truncate never fired
-  // again on that session.)
-  let skipPast = -1;
-  for (let index = 0; index < boundary; index += 1) {
-    const group = groups[index];
-    if (group.kind !== 'turn' || group.turn === 0 || group.completed) continue;
-    const lastPos = surfaceNodes.indexOf(group.seqs[group.seqs.length - 1]);
-    if (lastPos > skipPast) skipPast = lastPos;
-  }
-  if (skipPast >= 0) {
-    startIndex = Math.max(startIndex, skipPast + 1);
-    while (startIndex < surfaceNodes.length) {
-      const type = table.bySeq.get(surfaceNodes[startIndex])?.type;
-      if (type === 'user/message' || type === 'assistant/message') break;
-      startIndex += 1;
+  // Earliest run of consecutive cuttable groups that lies entirely before the
+  // retention boundary and holds at least one real closed turn. Runs made only
+  // of orphan messages/pointers are not worth a surface rewrite: skip them.
+  let chosenStart = -1;
+  let chosenEnd = -1;
+  for (let index = firstGroup; index < boundary; index += 1) {
+    if (!isCuttableGroup(groups[index])) continue;
+    let runEnd = index;
+    while (runEnd + 1 < boundary && isCuttableGroup(groups[runEnd + 1])) runEnd += 1;
+    let realTurns = 0;
+    for (let cursor = index; cursor <= runEnd; cursor += 1) {
+      if (groups[cursor].kind === 'turn' && groups[cursor].turn !== 0) realTurns += 1;
     }
+    if (realTurns > 0) { chosenStart = index; chosenEnd = runEnd; break; }
+    index = runEnd;
   }
-  if (endIndex < startIndex) return null;
-
-  // The host tolerates later system nodes inside a replacement range, but this
-  // engine promises never to cut one — and never to leave half a turn behind.
-  // A system node inside the candidate span excludes its whole turn, unless
-  // that turn sits at the head of the span: then keep it in place and start the
-  // span after it (a mid-turn system node must not freeze the plan forever).
-  for (let guard = 0; guard < 64; guard += 1) {
-    let headAfter = null;
-    let cutAt = null;
-    for (let index = startIndex; index <= endIndex; index += 1) {
-      if (table.bySeq.get(surfaceNodes[index])?.type !== 'system/message') continue;
-      const seq = surfaceNodes[index];
-      const owner = groups.find((group) => group.seqs.includes(seq));
-      const ownerStart = owner === undefined ? index : surfaceNodes.indexOf(owner.seqs[0]);
-      const ownerLast = owner === undefined ? index : surfaceNodes.indexOf(owner.seqs[owner.seqs.length - 1]);
-      if (ownerStart <= startIndex) { headAfter = ownerLast + 1; continue; }
-      cutAt = ownerStart - 1;
-      break;
-    }
-    if (headAfter !== null) {
-      startIndex = headAfter;
-      while (startIndex < surfaceNodes.length) {
-        const type = table.bySeq.get(surfaceNodes[startIndex])?.type;
-        if (type === 'user/message' || type === 'assistant/message') break;
-        startIndex += 1;
-      }
-      if (endIndex < startIndex) return null;
-      continue;
-    }
-    if (cutAt !== null) endIndex = Math.min(endIndex, cutAt);
-    break;
+  if (chosenStart < 0) {
+    return noPlan('blocked-prefix', {
+      firstGroup,
+      boundary,
+      blocked: groups.slice(firstGroup, boundary).map((group) => `${group.kind}:${group.turn}:${group.completed}`),
+    });
   }
-  if (endIndex < startIndex) return null;
+  let spanStart = Math.max(startIndex, groupStart[chosenStart]);
+  const endIndex = groupEnd[chosenEnd];
+  if (endIndex < spanStart) return noPlan('empty-span', { chosenStart, chosenEnd });
 
-  const shadowedSeqs = surfaceNodes.slice(startIndex, endIndex + 1);
+  // A system/message node *inside* the span is a host-restart re-injection of
+  // the same prompt; the host tolerates it inside a replacement range and it is
+  // archived together with the old prefix (approved 1.6.6 behaviour).
+  const shadowedSeqs = surfaceNodes.slice(spanStart, endIndex + 1);
   const shadowedSet = new Set(shadowedSeqs);
   const touchedGroups = groups.filter((group) => group.seqs.some((seq) => shadowedSet.has(seq)));
-  if (touchedGroups.some((group) => group.kind === 'turn' && group.turn !== 0 && !group.completed)) return null;
-  const cutTurnGroups = touchedGroups.filter((group) => group.kind === 'turn' && group.turn !== 0 && group.completed);
-  if (cutTurnGroups.length === 0) return null;
+  if (touchedGroups.some((group) => isCurrentTurnGroup(group))) return noPlan('current-turn-touched');
+  // No half turn: every touched turn group must be fully shadowed. The only
+  // allowed exception is a system/developer copy skipped at the head of the
+  // first group (it stays on the surface, never half-cut).
+  for (const group of touchedGroups) {
+    if (group.kind !== 'turn') continue;
+    const missing = group.seqs.filter((seq) => !shadowedSet.has(seq));
+    if (missing.some((seq) => !isInstructionSeq(seq))) return noPlan('split-group', { turn: group.turn });
+  }
+  const cutTurnGroups = touchedGroups.filter((group) => {
+    if (group.kind !== 'turn' || group.turn === 0) return false;
+    return !isCurrentTurnGroup(group);
+  });
+  if (cutTurnGroups.length === 0) return noPlan('no-turns', { chosenStart, chosenEnd });
 
-  // Archive every original event of the cut turns, plus any checkpoint node
-  // that positionally lived inside the replaced span (a previous pointer).
+  // Archive every original event of the cut turns, plus any checkpoint node and
+  // orphan (turn===0) message that positionally lived inside the replaced span.
   const archivedSeqs = new Set();
   const archiveEvents = [];
   for (const group of cutTurnGroups) {
-    const startSeq = table.byNumber.get(group.turn)?.startSeq;
-    const endSeq = table.byNumber.get(group.turn)?.endSeq;
-    if (!Number.isInteger(startSeq) || !Number.isInteger(endSeq)) continue;
-    for (let seq = startSeq; seq <= endSeq; seq += 1) {
+    const info = table.byNumber.get(group.turn);
+    if (info === undefined || !Number.isInteger(info.startSeq)) continue;
+    const endSeq = resolvedEndSeq(group);
+    for (let seq = info.startSeq; seq <= endSeq; seq += 1) {
       const event = table.bySeq.get(seq);
       if (event === undefined || archivedSeqs.has(seq)) continue;
       archivedSeqs.add(seq);
@@ -505,13 +573,13 @@ export function selectCutPlan(session, options, measurement, helpers = {}) {
       firstSeq: seqs[0],
       lastSeq: seqs[seqs.length - 1],
       startSeq: info?.startSeq ?? seqs[0],
-      endSeq: info?.endSeq ?? seqs[seqs.length - 1],
+      endSeq: resolvedEndSeq(group),
       surfaceEvents: seqs.length,
       tokens: seqs.reduce((total, seq) => total + prices.get(seq), 0),
     };
   });
   const shadowedTokenCount = shadowedSeqs.reduce((total, seq) => total + prices.get(seq), 0);
-  if (shadowedTokenCount <= 0) return null;
+  if (shadowedTokenCount <= 0) return noPlan('zero-token');
 
   const lastTouchedIndex = groups.indexOf(touchedGroups[touchedGroups.length - 1]);
   const retainedGroups = groups.slice(lastTouchedIndex + 1);
@@ -538,7 +606,9 @@ export function selectCutPlan(session, options, measurement, helpers = {}) {
     retainedTurns,
   });
   const pointerTokens = roughPointerTokens(previewText);
-  if (shadowedTokenCount < pointerTokens + options.minCutTokens) return null;
+  if (shadowedTokenCount < pointerTokens + options.minCutTokens) {
+    return noPlan('pointer-too-large', { shadowedTokenCount, pointerTokens });
+  }
 
   return {
     start: shadowedSeqs[0],
@@ -681,7 +751,7 @@ export function buildPointerText(facts) {
   const range = firstTurn === lastTurn ? `第 ${firstTurn} 轮` : `第 ${firstTurn}–${lastTurn} 轮`;
   const lines = [
     `本会话共 ${totalTurns} 轮，其中 ${archivedTurns} 轮已压缩归档；需要原文用 session_original(turn=…) 或读归档路径：${archivePath}`,
-    `本次热截断切掉${range}（${cutTurnCount} 轮 / ${shadowedTokenCount} tokens / ${surfaceEventCount} 个表面事件）；只切已完成且早于保留窗口的轮，切点之后的原文未动。`,
+    `本次热截断切掉${range}（${cutTurnCount} 轮 / ${shadowedTokenCount} tokens / ${surfaceEventCount} 个表面事件）；只切已结束且早于保留窗口的轮（含被中止/中断的旧轮），当前未完成的轮不切，切点之后的原文未动。`,
     `归档：${eventCount} 条原始事件（JSONL，每行含 seq/turn/原始消息）` + (sha256 ? `，sha256=${sha256.slice(0, 16)}…` : '') + '。',
     `保留窗口：最近 ${retainTurns} 个已完成轮、至少 ${retainTokens} tokens（本次保留 ${retainedTurns} 轮）。`,
   ];
@@ -864,6 +934,14 @@ export function createCutEngine(deps) {
       return selectCutPlan(session, this.options, measurement, {
         table,
         isCheckpointSource: isCompactCheckpointSource,
+        // "cut, or say why not": a refusal that would otherwise be silent is
+        // logged once per reason (warnOnce) so a permanently disabled hot
+        // truncate is always observable in the host log.
+        onNoPlan: (info) => {
+          const reason = String(info?.reason ?? 'unknown');
+          const detail = info?.detail === undefined || info?.detail === null ? '' : ` ${JSON.stringify(info.detail)}`;
+          this.warnOnce(`no-plan:${reason}`, `hot-truncate: 未切（${reason}）${detail}`);
+        },
       });
     }
 

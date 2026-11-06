@@ -11,7 +11,8 @@
 //                 mode=off, live-compact deference and no-op degradation.
 //
 // What is pinned here:
-//   * an open / aborted turn is never cut;
+//   * an open turn is never cut; a closed aborted turn is cut whole with the
+//     old prefix (1.6.6: it used to be a barrier that pinned everything);
 //   * only turns older than retainTurns AND retainTokens are cut;
 //   * the cut point and later surface text are untouched (only a prefix shrinks);
 //   * the archive contains every original event of the cut turns with a
@@ -395,34 +396,42 @@ test('H2 retainTurns and retainTokens both gate the cut', async () => {
   assert.equal(tokenDominant.surface.nodes.length, 1 + 10);
 });
 
-test('H3 aborted turns never freeze later cuts (and are never cut themselves)', async () => {
+test('H3 closed aborted turns are cut with the old prefix and never freeze later cuts', async () => {
   const session = new MockSession();
   for (let turn = 1; turn <= 3; turn += 1) addTurn(session, turn, { completed: false });
   for (let turn = 4; turn <= 9; turn += 1) addTurn(session, turn, { completed: true });
   addTurn(session, 10, { open: true });
-  // 2026-11-06 hotfix: a restart-aborted prefix used to make the plan null
-  // forever. The fixed planner skips past the aborted turns and still cuts the
-  // completed turns that follow (retain window keeps the last 4 completed).
-  const { engine } = engineFor({ archiveDir: caseDir('archive'), perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  // 1.6.6 hotfix: 1.6.5 still skipped past aborted turns, so when aborted turns
+  // recur near the tail the span collapsed to "the one completed turn after the
+  // last aborted turn" (the 396k-token bug). A turn with turn/end is closed and
+  // cuttable as a whole, so the prefix is removed in one plan.
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
   const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
-  assert.ok(result, 'completed turns after the aborted prefix are still cuttable');
-  assert.equal(result.shadowedSeqs.length, 4, 'only turns 4 and 5 (2 surface nodes each) are cut');
+  assert.ok(result, 'aborted turns must not block the prefix cut');
+  assert.equal(result.shadowedSeqs.length, 10, 'turns 1-5 (2 surface nodes each) are cut');
+  const archive = readArchive(path.join(dir, fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'))));
+  assert.deepEqual(archive.header.cutTurns.map((entry) => entry.turn), [1, 2, 3, 4, 5]);
   assert.equal(pointerEvents(session).length, 1);
+  // Only the four retained completed turns and the open turn stay.
+  assert.equal(session.surface.nodes.length, 1 + 8 + 2);
   const summary = pointerEvents(session)[0];
   const pointer = session.events[summary.seq + 1];
-  assert.match(pointer.data.content[0].text, /第 4–5 轮/);
+  assert.match(pointer.data.content[0].text, /第 1–5 轮/);
 });
 
 // ---------------------------------------------------------------------------
 // Archive
 // ---------------------------------------------------------------------------
 
-test('H3b mid-turn system node at the head of the span does not freeze later cuts', async () => {
-  // 2026-11-06 second hotfix: the candidate span can start at a turn whose
-  // first surface node is an assistant message and whose later node is a
-  // system/message (host-injected). The old system-node guard trimmed the
-  // span to nothing; the fixed planner keeps that head turn in place and
-  // starts the span after it.
+test('H3b a mid-turn system node is archived with its old prefix instead of freezing the plan', async () => {
+  // 1.6.6: 1.6.5 kept the whole turn containing a host-injected system node in
+  // place and started the span after it. When such injections land inside
+  // several completed turns (every host restart re-emits the prompt mid-turn),
+  // that rule pinned ≈100k tokens permanently: real session 2026-11-06 turns
+  // 66/72/75. The protected copy is the leading one at surface 0 (see H28); a
+  // later injected copy is host-tolerated inside a replacement range, so it is
+  // archived with the prefix it belongs to.
   const session = new MockSession();
   for (let turn = 1; turn <= 3; turn += 1) addTurn(session, turn, { completed: false });
   session.append('turn/start', { turn: 4 });
@@ -455,13 +464,212 @@ test('H3b mid-turn system node at the head of the span does not freeze later cut
   session.append('turn/end', { turn: 4, reason: { kind: 'completed' } });
   for (let turn = 5; turn <= 10; turn += 1) addTurn(session, turn, { completed: true });
   addTurn(session, 11, { open: true });
-  const { engine } = engineFor({ archiveDir: caseDir('archive'), perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
   const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
-  assert.ok(result, 'a mid-turn system node at the span head must not freeze the plan');
-  assert.equal(result.shadowedSeqs.length, 4, 'turns 5 and 6 (2 surface nodes each) are cut');
+  assert.ok(result, 'a mid-turn system node must not freeze the prefix cut');
+  assert.equal(result.shadowedSeqs.length, 13, 'turns 1-6 (2+2+2+3+2+2 surface nodes) are cut');
+  const archive = readArchive(path.join(dir, fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'))));
+  assert.deepEqual(archive.header.cutTurns.map((entry) => entry.turn), [1, 2, 3, 4, 5, 6]);
+  assert.equal(session.surface.nodes.length, 1 + 8 + 2, 'pointer + four retained turns + open turn');
   const summary = pointerEvents(session)[0];
   const pointer = session.events[summary.seq + 1];
-  assert.match(pointer.data.content[0].text, /第 5–6 轮/);
+  assert.match(pointer.data.content[0].text, /第 1–6 轮/);
+});
+
+test('H30 a mid-surface aborted turn does not collapse the plan to one turn (396k regression)', async () => {
+  // Real session 2026-11-06 shape: the log has many completed turns, one
+  // restart-aborted turn near the tail, and the retention boundary right after
+  // it. 1.6.5 moved the span past the aborted turn, so the cut became "one
+  // completed turn / 6-18k tokens" while the whole older prefix stayed. The
+  // new planner must cut the entire prefix, aborted turn included, so that
+  // only the four retained completed turns and the open turn are left.
+  const session = new MockSession();
+  for (let turn = 1; turn <= 10; turn += 1) addTurn(session, turn, { completed: true });
+  addTurn(session, 11, { completed: false }); // aborted, closed
+  for (let turn = 12; turn <= 20; turn += 1) addTurn(session, turn, { completed: true });
+  addTurn(session, 21, { open: true });
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
+  assert.ok(result);
+  assert.equal(result.shadowedSeqs.length, 32, '16 turns x 2 surface nodes, aborted turn included');
+  const archive = readArchive(path.join(dir, fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'))));
+  assert.deepEqual(archive.header.cutTurns.map((entry) => entry.turn), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  // pointer + turns 17-20 (8 nodes) + open turn 21 (2 nodes)
+  assert.equal(session.surface.nodes.length, 1 + 8 + 2);
+  const abortedUser = session.events.find((event) => event.type === 'user/message' && event.data.id === 'user-11');
+  assert.equal(session.surface.nodes.includes(abortedUser.seq), false, 'the aborted turn left the surface');
+  const openUser = session.events.find((event) => event.type === 'user/message' && event.data.id === 'user-21');
+  assert.equal(session.surface.nodes.includes(openUser.seq), true, 'the open turn is never cut');
+  assert.match(result.summary[0].text, /第 1–16 轮/);
+});
+
+test('H30b real-session shape: head system + mid-surface injected system + aborted turns', async () => {
+  // Mirrors session-e219dedf on 2026-11-06: the real system prompt sits at
+  // surface 0 and must stay; a restart injects a second system/message in the
+  // middle of the surface (inside turn 12); several turns are aborted; the
+  // current turn is open. A single cut must remove the whole old prefix and
+  // leave exactly the four retained completed turns plus the open turn.
+  const session = new MockSession();
+  addTurnWithSystemHead(session, 1);
+  for (let turn = 2; turn <= 20; turn += 1) {
+    if (turn === 12) {
+      session.append('turn/start', { turn: 12 });
+      session.append('user/message', {
+        id: 'user-12', role: 'user', content: [{ type: 'text', text: '第 12 轮用户消息' }],
+        source: { kind: 'user', clientTimeZone: 'Asia/Shanghai' },
+      }, { surfaceOp: 'append' });
+      session.append('assistant/message', {
+        turn: 12, step: 1,
+        message: {
+          id: 'assistant-12', role: 'assistant',
+          source: { kind: 'model', provider: 'test', model: 'test' },
+          content: [{ type: 'text', text: '第 12 轮回答' }],
+        },
+      }, { surfaceOp: 'append' });
+      session.append('system/message', {
+        turn: 12, step: 2,
+        message: {
+          id: 'system-12', role: 'system', source: { kind: 'system-prompt' },
+          content: [{ type: 'text', text: 'You are an AI agent powered by DeepSeek Harness.' }],
+        },
+      }, { surfaceOp: 'append' });
+      session.append('turn/end', { turn: 12, reason: { kind: 'completed' } });
+      continue;
+    }
+    if (turn === 8 || turn === 15) addTurn(session, turn, { completed: false });
+    else addTurn(session, turn, { completed: true });
+  }
+  addTurn(session, 21, { open: true });
+  const systemEvent = session._events.find((event) => event.type === 'system/message');
+  const injected = session._events.filter((event) => event.type === 'system/message')[1];
+  assert.ok(systemEvent && injected);
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
+  assert.ok(result, 'the 396k shape must produce a plan');
+  const archive = readArchive(path.join(dir, fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'))));
+  assert.deepEqual(archive.header.cutTurns.map((entry) => entry.turn), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+  assert.equal(result.shadowedSeqs.includes(systemEvent.seq), false, 'the head system prompt is never cut');
+  assert.equal(result.shadowedSeqs.includes(injected.seq), true, 'the injected copy goes with the old prefix');
+  assert.equal(session.surface.nodes[0], systemEvent.seq, 'head system prompt stays at surface 0');
+  // head system + pointer + four retained turns (8 nodes) + open turn (2 nodes)
+  assert.equal(session.surface.nodes.length, 1 + 1 + 8 + 2);
+  assert.equal(session.surface.nodes.includes(injected.seq), false, 'injected copy left the surface');
+});
+
+// ---------------------------------------------------------------------------
+// 1.6.7 hardening: barriers must never disable hot truncate silently
+// ---------------------------------------------------------------------------
+
+/** Append a message-shaped event that belongs to no turn (no turn/start). */
+function orphanMessage(session, type, id, text) {
+  const data = type === 'assistant/message'
+    ? { message: { id, role: 'assistant', content: [{ type: 'text', text }] } }
+    : { role: type === 'system/message' ? 'system' : 'user', id, content: [{ type: 'text', text }] };
+  return session.append(type, data, { surfaceOp: 'append' });
+}
+
+test('H35 head truncated mid-turn (orphan messages before the system prompt) still cuts', async () => {
+  // Red team E1: raw log truncation drops the head turn/start, leaving orphan
+  // user/assistant surface nodes before the re-appended system prompt. 1.6.6
+  // treated the turn===0 group as open => plan null forever. Now the orphan
+  // block/head instructions are kept in place and the closed turns after them
+  // are cut (red team E1: null -> [1,2]).
+  const session = new MockSession();
+  const orphanU = orphanMessage(session, 'user/message', 'orphan-u', 'orphan-mid-turn');
+  orphanMessage(session, 'assistant/message', 'orphan-a', 'orphan answer');
+  const headSystem = orphanMessage(session, 'system/message', 'head-sys', 'HEAD-SYSTEM');
+  for (let turn = 1; turn <= 7; turn += 1) {
+    if (turn === 7) addTurn(session, turn, { open: true });
+    else addTurn(session, turn, { completed: true });
+  }
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
+  assert.ok(result, 'the head barrier must not disable the planner (E1 was null before)');
+  const file = fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'));
+  const parsed = readArchive(path.join(dir, file));
+  assert.deepEqual(parsed.header.cutTurns.map((entry) => entry.turn), [1, 2]);
+  assert.equal(result.shadowedSeqs.includes(headSystem.seq), false, 'head system instruction is never cut');
+  assert.equal(session.surface.nodes.includes(headSystem.seq), true, 'head system instruction stays on the surface');
+  assert.equal(session.surface.nodes.includes(orphanU.seq), true, 'orphan head block stays in place');
+});
+
+test('H36 a stray user/message between turns does not pin the prefix (red team E3)', async () => {
+  const session = new MockSession();
+  const headSystem = orphanMessage(session, 'system/message', 'head-sys', 'HEAD');
+  addTurn(session, 1, { completed: true });
+  const stray = session.append('user/message', {
+    id: 'between-turns', role: 'user', content: [{ type: 'text', text: 'between-turns' }],
+  }, { surfaceOp: 'append' });
+  for (let turn = 2; turn <= 7; turn += 1) {
+    if (turn === 7) addTurn(session, turn, { open: true });
+    else addTurn(session, turn, { completed: true });
+  }
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
+  assert.ok(result, 'the stray turn-0 group must not freeze the cut (E3 cut only [1] before)');
+  const file = fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'));
+  const parsed = readArchive(path.join(dir, file));
+  assert.deepEqual(parsed.header.cutTurns.map((entry) => entry.turn), [1, 2]);
+  assert.equal(result.shadowedSeqs.includes(stray.seq), true, 'the stray message is inside the cut span');
+  assert.equal(session.surface.nodes.includes(stray.seq), false, 'the stray message left the surface');
+  assert.equal(session.surface.nodes.includes(headSystem.seq), true, 'the head system instruction stays');
+  assert.equal(parsed.records.some((record) => record.seq === stray.seq), true, 'the stray message is recoverable from the archive');
+});
+
+test('H37 a mid-log turn missing turn/end does not block later cuts (red team E2)', async () => {
+  const session = new MockSession();
+  orphanMessage(session, 'system/message', 'head-sys', 'HEAD');
+  addTurn(session, 1, { completed: true });
+  const abandonedStart = session.events.length;
+  addTurn(session, 2, { open: true }); // turn/end lost by log truncation
+  const abandonedEnd = session.events.length - 1;
+  for (let turn = 3; turn <= 6; turn += 1) addTurn(session, turn, { completed: true });
+  addTurn(session, 7, { open: true }); // the real current turn
+  const currentUser = session.events.find((event) => event.type === 'user/message' && event.data.id === 'user-7');
+  const dir = caseDir('archive');
+  const { engine } = engineFor({ archiveDir: dir, perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
+  assert.ok(result, 'an abandoned mid-log unclosed turn must not freeze the planner');
+  const file = fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'));
+  const parsed = readArchive(path.join(dir, file));
+  assert.deepEqual(parsed.header.cutTurns.map((entry) => entry.turn), [1, 2], 'turns before the retention window are cut');
+  const abandoned = parsed.header.cutTurns.find((entry) => entry.turn === 2);
+  assert.ok(abandoned.endSeq > abandoned.startSeq, 'abandoned turn archive range is inferred, not empty');
+  assert.equal(parsed.records.some((record) => record.turn === 2), true, 'abandoned turn events are recoverable');
+  assert.equal(session.surface.nodes.includes(currentUser.seq), true, 'the current open turn is never cut');
+  assert.equal(session.surface.nodes.some((seq) => seq >= abandonedStart && seq <= abandonedEnd), false, 'the abandoned turn left the surface');
+  assert.equal(result.shadowedSeqs.includes(currentUser.seq), false);
+});
+
+test('H38 "cut or say why": a blocked prefix logs a structured refusal instead of silence', async () => {
+  // Normal case: not enough completed turns yet.
+  const small = new MockSession();
+  addTurn(small, 1, { completed: true });
+  addTurn(small, 2, { completed: false });
+  addTurn(small, 3, { open: true });
+  const { engine, ctx } = engineFor({ archiveDir: caseDir('archive'), perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const none = await engine.compactIfNeeded(makeAgent(small), 'pressure', new AbortController().signal);
+  assert.equal(none, null);
+  assert.match(ctx.text('warn'), /未切（not-enough-turns）/);
+
+  // Blocked prefix: the only groups older than the boundary are a turn===0
+  // system zone, so there is nothing whole to cut. The reason must be visible.
+  const blocked = new MockSession();
+  orphanMessage(blocked, 'system/message', 'head-sys', 'HEAD');
+  for (let turn = 1; turn <= 5; turn += 1) {
+    if (turn === 5) addTurn(blocked, turn, { open: true });
+    else addTurn(blocked, turn, { completed: true });
+  }
+  const second = engineFor({ archiveDir: caseDir('archive'), perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const blockedResult = await second.engine.compactIfNeeded(makeAgent(blocked), 'pressure', new AbortController().signal);
+  assert.equal(blockedResult, null, 'nothing cuttable yet');
+  assert.match(second.ctx.text('warn'), /未切（blocked-prefix）/);
+  assert.match(second.ctx.text('warn'), /head-sys|blocked-prefix/);
 });
 
 test('H4 archive: atomic JSONL, exact event count, sha256, append-only', async () => {
@@ -525,7 +733,7 @@ test('H5 pointer text carries N/M, session_original(turn=…), and the archive p
   const text = result.summary[0].text;
   assert.match(text, /本会话共 9 轮，其中 3 轮已压缩归档；需要原文用 session_original\(turn=…\) 或读归档路径：/);
   assert.ok(text.includes(dir), 'archive directory is in the pointer');
-  assert.match(text, /只切已完成且早于保留窗口的轮/);
+  assert.match(text, /只切已结束且早于保留窗口的轮/);
   assert.match(text, /保留窗口：最近 6 个已完成轮、至少 0 tokens（本次保留 6 轮）/);
 
   const pointerEvent = session.events[result.summarySeq + 1];
@@ -586,7 +794,12 @@ test('H28 a system prompt at surface 0 is never cut; the pointer lands at positi
   assert.equal(parsed.header.cutTurns[0].startSeq, 0, 'the archive still covers the whole turn');
 });
 
-test('H29 a system message inside the candidate span stops the cut before its turn', async () => {
+test('H29 a mid-span host-injected system message is archived with the old prefix', async () => {
+  // 1.6.6: the head system prompt is still never cut (H28). A host-injected
+  // system/message in the middle of the surface is a duplicate re-emitted by a
+  // restart; the host tolerates it inside a replacement range, and keeping it
+  // outside pinned every following turn forever. It is archived with the old
+  // prefix instead of stopping the cut before its turn.
   const session = new MockSession();
   addTurn(session, 1);
   addTurnWithSystemInside(session, 2);
@@ -596,12 +809,12 @@ test('H29 a system message inside the candidate span stops the cut before its tu
   const dir = caseDir('archive');
   const { engine } = engineFor({ archiveDir: dir });
   const result = await engine.compactNow(makeAgent(session), new AbortController().signal);
-  assert.ok(result, 'the safe prefix before the system message is still cuttable');
-  assert.equal(result.shadowedSeqs.includes(systems[0].seq), false);
+  assert.ok(result, 'the old prefix is cuttable');
+  assert.equal(result.shadowedSeqs.includes(systems[0].seq), true, 'the injected copy is archived with the prefix');
   const file = fs.readdirSync(dir).find((name) => name.endsWith('.jsonl'));
   const parsed = readArchive(path.join(dir, file));
-  assert.deepEqual(parsed.header.cutTurns.map((entry) => entry.turn), [1], 'only turn 1 is cut');
-  assert.equal(session.surface.nodes.includes(systems[0].seq), true, 'the system node remains on the surface');
+  assert.deepEqual(parsed.header.cutTurns.map((entry) => entry.turn), [1, 2], 'turn 1 and the injected turn 2 are cut');
+  assert.equal(session.surface.nodes.includes(systems[0].seq), false, 'the injected copy left the surface with its turn');
 });
 
 test('H6 successive cuts update the cumulative archived count and fold the old pointer', async () => {
