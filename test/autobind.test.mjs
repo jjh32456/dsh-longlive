@@ -282,11 +282,10 @@ export async function runAutoBindSuite({ runCase, assert, TMP }) {
     return 'tool touch refreshes; first call registers; unknown identity writes nothing';
   });
 
-  runCase('AB13', 'turn/start 与 turn/end：只刷新已绑定行，其他会话一律忽略', () => {
+  runCase('AB13', 'turn 边界：按事件会话维护任意行（含未绑定）；tick 仍只刷绑定行', () => {
     const root = newRoot(TMP, 'turns');
     seedRow(root, 'mine');
     seedRow(root, 'other');
-    const beforeOther = fileSha(rowPath(root, 'other'));
     const beat = createAutoHeartbeat({
       memoryRoot: root,
       heartbeatMs: 0,
@@ -294,8 +293,9 @@ export async function runAutoBindSuite({ runCase, assert, TMP }) {
       resolve: () => ({ id: 'mine', source: 'exec.agent' }),
     });
     beat.bind('mine');
-    // heartbeatMs:0 disables writes by contract; flip it on for this case by
-    // rebuilding with a real interval but no timer (start() not called).
+    // heartbeatMs:0 disables the timer/tool touches; turn boundaries are an
+    // event-driven state machine and keep working for both bound and unbound
+    // sessions (R4.5: the event itself carries the session id).
     const live = createAutoHeartbeat({
       memoryRoot: root,
       heartbeatMs: DEFAULT_HEARTBEAT_MS,
@@ -303,8 +303,12 @@ export async function runAutoBindSuite({ runCase, assert, TMP }) {
       now: () => NOW + 2000,
     });
     live.bind('mine');
-    live.onSessionEvent({ id: 'other' }, { type: 'turn/end', data: { turn: 3 } });
-    assert(fileSha(rowPath(root, 'other')) === beforeOther, 'other row untouched');
+    const mineBefore = fileSha(rowPath(root, 'mine'));
+    live.onSessionEvent({ id: 'other' }, { type: 'turn/start', data: { turn: 4 } });
+    const otherStart = readRow(root, 'other');
+    assert(otherStart.state === 'running' && otherStart.turn === 4,
+      `unbound session row must follow turn/start, got ${otherStart.state}/${otherStart.turn}`);
+    assert(fileSha(rowPath(root, 'mine')) === mineBefore, 'another session event must not touch this row');
     live.onSessionEvent({ id: 'mine' }, { type: 'turn/start', data: { turn: 4 } });
     const afterStart = readRow(root, 'mine');
     assert(afterStart.last_action.detail === 'turn/start #4', afterStart.last_action.detail);
@@ -312,7 +316,8 @@ export async function runAutoBindSuite({ runCase, assert, TMP }) {
     const afterEnd = readRow(root, 'mine');
     assert(afterEnd.last_action.detail === 'turn/end #4', afterEnd.last_action.detail);
     assert(beat.boundIds().join(',') === 'mine', 'disabled manager still binds');
-    return 'turn boundaries refresh only the bound row';
+    assert(live.boundIds().join(',') === 'mine', 'turn events maintain rows without binding them');
+    return 'turn boundaries maintain bound + unbound rows without binding';
   });
 
   runCase('AB14', '兜底定时器：默认 15s、unref、只刷心跳不动 last_action、stop 后清掉', () => {
@@ -355,14 +360,14 @@ export async function runAutoBindSuite({ runCase, assert, TMP }) {
     return `${capturedMs}ms, unref, one tick, stop`;
   });
 
-  runCase('AB15', 'heartbeatMs:0 关闭全部自动写；绑定上限有界', () => {
+  runCase('AB15', 'heartbeatMs:0 关闭定时心跳与工具写；turn 边界仍维护 state/turn；绑定上限有界', () => {
     const root = newRoot(TMP, 'off');
     seedRow(root, 'mine');
-    const before = fileSha(rowPath(root, 'mine'));
     let timerCalls = 0;
     const beat = createAutoHeartbeat({
       memoryRoot: root,
       heartbeatMs: 0,
+      now: () => NOW + 3000,
       ctx: { on: () => () => {} },
       setInterval: () => { timerCalls += 1; return { unref() {} }; },
       resolve: () => ({ id: 'mine', source: 'exec.agent' }),
@@ -371,11 +376,20 @@ export async function runAutoBindSuite({ runCase, assert, TMP }) {
     beat.start();
     assert(timerCalls === 0, 'no timer when disabled');
     assert(beat.autoTouch({}, 'session_live_list') === null, 'no tool touch when disabled');
+    // R4.3/R4.5: turn boundaries are event driven, so "no fallback timer" must
+    // not also mean "no live state machine" — and the row does not even need a
+    // prior bind, because the event itself names the session.
     beat.onSessionEvent({ id: 'mine' }, { type: 'turn/start', data: { turn: 1 } });
-    assert(fileSha(rowPath(root, 'mine')) === before, 'row bytes unchanged');
+    const afterStart = readRow(root, 'mine');
+    assert(afterStart.state === 'running' && afterStart.turn === 1,
+      `turn/start must switch state/turn, got ${afterStart.state}/${afterStart.turn}`);
+    beat.onSessionEvent({ id: 'mine' }, { type: 'turn/end', data: { turn: 1 } });
+    const afterEnd = readRow(root, 'mine');
+    assert(afterEnd.state === 'idle' && afterEnd.turn === 1,
+      `turn/end must land idle + turn, got ${afterEnd.state}/${afterEnd.turn}`);
     for (let i = 0; i < MAX_BOUND_SESSIONS + 10; i += 1) beat.bind(`s-${i}`);
     assert(beat.boundIds().length === MAX_BOUND_SESSIONS, `bound=${beat.boundIds().length}`);
-    return '0 disables writes; bound set capped';
+    return '0 disables timer/tool writes; turn state machine still runs; bound set capped';
   });
 }
 

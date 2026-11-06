@@ -154,6 +154,9 @@ test('defaults: all five capabilities are off and documented values are exact', 
     autoRecall: { enabled: false, topK: 3, budgetTokens: 2000, everyNTurns: 6, createUserMessage: undefined },
     identityCard: { enabled: false, path: '<memoryRoot>/STATE.md', maxChars: 800, createUserMessage: undefined },
     presenceBus: { enabled: false, pollMs: 3000, root: undefined },
+    sharedBrain: {
+      activity: { enabled: false, injectMaxChars: 300, maxItems: 5, createUserMessage: undefined },
+    },
     autoMaintenance: {
       enabled: false,
       consolidate: true,
@@ -233,6 +236,20 @@ test('presenceBus on: only one extra session/event hook', (t) => {
   assert.deepEqual(result.hooks, [
     ...BASELINE.hooks,
     { name: 'session/event', prepend: false, priority: null },
+  ]);
+  assert.deepEqual(result.featureReads, []);
+  assert.deepEqual(result.memoryTree, []);
+});
+
+test('sharedBrain.activity on: one session/event producer + one pre-step injector', (t) => {
+  const result = runPackage({ sharedBrain: { activity: { enabled: true } } });
+  t.after(() => cleanup(result));
+
+  assert.deepEqual(result.tools, BASELINE.tools);
+  assert.deepEqual(result.hooks, [
+    ...BASELINE.hooks,
+    { name: 'session/event', prepend: false, priority: null },
+    { name: 'agent/pre-step', prepend: false, priority: null },
   ]);
   assert.deepEqual(result.featureReads, []);
   assert.deepEqual(result.memoryTree, []);

@@ -1,6 +1,6 @@
 # CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
-适用版本：**1.6.7**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.6.8**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---
@@ -81,7 +81,7 @@ autoTruncate:
 |---|---|---|---|---|---|
 | `keepEvents` | integer | `20000` | ≥ 1 | 是 | 只作为 `session_truncate` 的默认 `keepEvents`（`src/index.js:199`）。切点还会被"第一条可见消息"夹住，见 `planTruncation` `src/truncate.js:103-152` |
 | `recentWriteWindowMs` | integer | `60000` | ≥ 0 | 是 | 最近写窗口；窗口内拒绝截断（`SESSION_RECENT_WRITE`）。runner 走 CLI 时显式传 0，因为它假定宿主已退出 |
-| `heartbeatMs` | integer | `15000` | 有限正数；`0` 关闭自动写 | 是 | 只影响 live 注册表心跳，**不影响**自动截断：`onTurnEnd` 在 `enabled` 门之前触发（`src/heartbeat.js:169`）。给 1 这种极小值 = 高频写盘，别这么干；无上限校验 |
+| `heartbeatMs` | integer | `15000` | 有限正数；`0` 只关定时心跳与工具调用触发的写 | 是 | `0` **不关 turn 边界状态机**：turn/start 与 turn/end 仍维护 live 行 state/turn；也不影响自动截断：`onTurnEnd` 在 `enabled` 门之前触发（`src/heartbeat.js:169`）。给 1 这种极小值 = 高频写盘，别这么干；无上限校验 |
 | `recoverOnStart` | boolean | `true` | `true` / `false` | 是 | 启动时扫 `.truncate-visible-inflight.json` 并收尾/回滚（`src/index.js:230-236` + `sweepInflight`）。只有排障时才建议关 |
 | `originalFetchMaxBytes` | integer | `65536` | 1024..4194304（超范围夹回） | 否 | 仅 `session_original` 的单次返回上限（UTF-8 字节）；超出按 `offset` 分页。隐私门先扫全量，调大它不会绕过隐私拦截 |
 | `touchLiveSession` / `now` / `defineTool` | 内部 | — | — | 是 | 测试注入缝（`src/index.js:160,193-195,205`），不是给部署用的稳定配置；**待核实**未来版本是否保留 |
@@ -209,7 +209,7 @@ d6:
 | `memoryRoot` | string | `~/.dsh/longlive-memory` | 目录 | 是 | 面板只读这个目录。插件配了显式根（本机示例 `<memory-root>`）而面板没配 → **面板显示 0 卡**（它读的是默认空目录），不是记忆丢了 |
 | `sessionsRoot` | string | `~/.dsh/sessions` | 目录 | 是 | "截断记录"页读这里的 `<会话目录>/truncate.json`、`truncate-visible.json`（宿主可见对话截断账本）和 `backups.json`（并 stat 账本里记的备份文件）；两份截断账合并后按时间倒序列出。指错 → 该页空白 |
 
-面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。0.2.5 是配套本版的文案与 G1/G2/G4 修复版；0.2.6 在此基础上重排「活体心跳」（运行中 → 空闲 → 已归档，已归档默认折叠）。本机 `desktop` profile 装的是 0.2.5，面板 `src/` 已热更到 0.2.6 内容；升级/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
+面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。0.2.6 是配套本版的「六层视图活体行排序 + 已归档折叠（按需物化）」与红队 v1 回执修复版；本机 `desktop` profile 之前装的是旧版面板，升级到 0.2.6 的装法/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
 
 **1.6.0 新增：插件自带的设置页伴侣**（不是上面的面板包）。`package.json` 的 `./client` +
 `src/ui/*` 在宿主设置页的插件行注册 `plugins.row.config`，标题「久视 · 功能开关」，提供 7 个
@@ -218,6 +218,32 @@ slot key 为 `@jjh32456/dsh-longlive#session-longlive`（包名已改，row id �
 保存走宿主 `configEditor.edit` 写回 profile patch，再由 Loader 常规重载；没有 `webServer`
 的 profile 不注册 `/api/longlive/flags`，插件照常加载。`workers.enabled` 不在 7 个面板开关里，
 需要直接改配置。
+
+### 1.5b 共享大脑活动流 `sharedBrain.activity`（默认关闭）
+
+```yaml
+sharedBrain:
+  activity:
+    enabled: true          # 字面 true 才开启；与 presenceBus 无关
+    injectMaxChars: 300    # 每轮注入总字符上限（含固定头尾，60–2000）
+    maxItems: 5            # 每轮最多注入条数（1–10）
+```
+
+| 键 | 类型 | 默认值 | 合法值 / 范围 | 改了要重启？ | 风险与说明 |
+|---|---|---|---|---|---|
+| `enabled` | boolean | `false` | `true` / `false` | 是 | 开启后：按事件写活动行（同 key ≤1 条/10s 节流）到 `<memoryRoot>/.longlive/board/activity.jsonl`；`agent/pre-step` 只注入 `seq > lastSeenSeq` 的其他会话活动。失败静默，不影响 turn |
+| `injectMaxChars` | number | `300` | 60–2000 | 是 | 渲染后的整条提示（含 `【共享大脑活动】` 头与 `【活动结束】` 尾）不超过此值；预算不够时先裁条目标题、再少注入几条 |
+| `maxItems` | number | `5` | 1–10 | 是 | 最多条数；blocked 优先 |
+
+- 判重：同会话最近 10 条内 `key` 相同或文本相似度 ≥0.8 → 合并，`count+1`、`last_at` 更新、正文保留首条。
+- 蒸馏：同 key 连续 3 次（`count`）或累计 10 次 → 旧行 `archived:true`，新增一条
+  `阶段：<key>（N 次，最近 …）`。500 条窗口外的最旧行归档到 `activity-YYYYMM.jsonl`。
+- 每会话游标：`<memoryRoot>/.longlive/bridge/<sessionId>.activity.json`（`lastSeenSeq`）。
+  与 A1 结论桥的 `<sessionId>.json` 分开，互不覆盖；删掉该文件只会让该会话下次重新看到最近 5 条。
+- 隐私门：写盘前与注入前都调 `src/recall/privacy.mjs`；`local_only` 的活动不写、不注入。
+- 回退：`enabled: false` 并重启；已写文件保留，可手动删除。
+- 面板：活动流的「谁在干什么」页**不在 1.6.8 配套的面板 0.2.6 内**（面板侧后续版本 0.2.7 提供）；
+  longlive 包只负责写盘与增量注入。
 
 ### 1.6 Router 1.1.0（默认关闭，50 键）
 
@@ -380,7 +406,8 @@ config:
 |---|---|---|---|---|
 | `workers.enabled` | boolean | `false` | `true` / `false` | 关闭时三个 worker 工具都返回 unavailable；打开后仍受宿主 `subagents` 服务是否存在约束 |
 
-整块不在 `src/config.js` 的 Config schema 里（保持 schema 面不变），属于透传配置；Cordis
+整块不在 `src/config.js` 的 90 节点 Config schema 里（1.6.0 为 80；1.6.4 的 `hotTruncate`
+块 +5，本次活动流 `sharedBrain.activity` 再 +5；透传键保持 schema 面稳定），属于透传配置；Cordis
 的 schema 校验保留未知键，运行时由 `src/tools.js` 的注册包装读取。
 
 ---

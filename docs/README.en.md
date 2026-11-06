@@ -7,6 +7,7 @@ A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back 
 - A built-in settings-page companion: `plugins.row.config` under `@jjh32456/dsh-longlive#session-longlive` with seven feature switches (D2/D6/auto-recall/presence bus/background face/daily maintenance/Router). Profiles without a Web server simply get no route.
 - A memory store at `<DSH home>/longlive-memory` (on Windows: `%USERPROFILE%\.dsh\longlive-memory`), created on first start.
 - Optional: the separate read-only panel `@jjh32456/dsh-longlive-panel@0.2.6` adds a sidebar named **潜望镜 (Periscope)**. The plugin itself ships no UI.
+- Optional and **off by default**: `sharedBrain.activity` writes one local-rule activity row per turn and injects only unseen rows from other sessions (max 5 rows / 300 chars; zero tokens when nothing is new). Independent of `presenceBus`.
 - Optional and **off by default**: `d2.enabled` trims oversized tool output (the full text is archived), `d6.enabled` freezes a per-task tool allowlist and registers `tool_search`. See [FEATURES.md](FEATURES.md) and [CONFIG.md](CONFIG.md) for enabling, budget and rollback.
 
 ## Install (3 commands)
@@ -14,7 +15,7 @@ A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back 
 ```powershell
 $DSH  = '<DSH install>\resources\runtime\cli\bin\dsh.cmd'
 $NODE = '<DSH install>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
-& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.7.tgz"
+& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.8.tgz"
 & $DSH plugin --profile desktop list --depth 0
 & $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```

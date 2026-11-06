@@ -3,6 +3,37 @@
 本文件从 0.7.6 开始记录；更早的版本没有随包维护变更日志（0.7.5 及以前的 tarball 里没有
 CHANGELOG）。
 
+## 1.6.8 — 2026-11-06
+
+**共享大脑活动流 + 共享板状态诚实性。** 在 1.6.7 之上并入此前 1.6.1-rc.1 批次的活动流，
+并修复 shared board / status / live 三处投影不一致；热截断行为与 1.6.7 相同。
+
+### 共享大脑活动流（`sharedBrain.activity`，默认关闭）
+
+- 事件级写入：工具/轮次事件用本地规则（不调 LLM）生成 ≤140 字活动行，写进
+  `<memoryRoot>/.longlive/board/activity.jsonl`；同 key ≤1 条/10s 节流；turn/end 写结论行。
+- 判重/蒸馏：同会话最近 10 条内 key 相同或文本相似度 ≥0.8 合并（count+1）；同 key 连续 3 次 /
+  累计 10 次压成「阶段」行；500 条窗口 + 月度归档。
+- 增量注入：每会话游标 `.longlive/bridge/<sessionId>.activity.json`；`agent/pre-step` 只注入
+  其他会话 `seq > lastSeenSeq` 的新增，最多 5 条 / 整条 ≤300 字，无新增零 token、零写盘。
+- 隐私门复用 `src/recall/privacy.mjs`；写盘跨进程锁 + tmp/fsync/rename；失败静默，不影响 turn。
+- 默认 `enabled: false`（代码默认 / Config schema / 包内 `cordis.patch.yml` 三处一致），与
+  `presenceBus` 完全独立。
+
+### 共享板状态诚实性
+
+- `pulse.running` 取有效活跃会话数，`board.json` 与 `status.json` 同字段一致。
+- focus 行给出「目标写入时间」，过期或与最近动作明显不符时标 stale，不再拿心跳冒充更新时间。
+- live 行 state/turn 在 turn 开始/结束时正确切换；开机卡带「状态卡写于 X 分钟前」。
+
+### 兼容与升级
+
+- 版本面同步：`package.json`、README/QUICKSTART/SPEC/docs、CHANGELOG、`cordis.patch.yml`、
+  `test/packaging.test.mjs` 与新增 `test/version-consistency.test.mjs` 的断言一致。
+- 面板是独立包 `@jjh32456/dsh-longlive-panel@0.2.6`，与 1.6.8 配套提供（活动流面板页仍不在
+  0.2.6 内，留待面板 0.2.7）；1.6.8 安装集 = `dist/jjh32456-dsh-longlive-1.6.8.tgz`（本包，
+  npm pack 产出）+ `dist/jjh32456-dsh-longlive-panel-0.2.6.tgz`（面板原样包）。
+
 ## 1.6.7
 
 - 热截断加固：turn===0 / 无 turn 记录的组不再永久屏障（含 system/developer 指令的原地保留，只含普通消息的随旧前缀整组归档）；中段缺 turn/end 的轮只有最后启动的当前轮不可切；新增 onNoPlan 拒绝原因通道，切不了会写 'hot-truncate: 未切（reason）'，杜绝静默零进展。

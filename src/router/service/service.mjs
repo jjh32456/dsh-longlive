@@ -607,8 +607,13 @@ export class RouterService {
         pulse: {
           ...(board.pulse ?? {}),
           active: board.activeSessions ?? 0,
-          running: 0,
-          blocked: this.panelState === 'blocked' ? 1 : 0,
+          // R4.2: same projection as board.json — never a second, hardcoded
+          // number. Before this, status.json said 0 while board.json said 34.
+          running: board.pulse?.running ?? 0,
+          // R4.7: blocked is the same pulse field as the board's — never the
+          // Router's own panelState wearing the same name with another value.
+          // Router state is already reported as status.state.
+          blocked: board.pulse?.blocked ?? 0,
           unknownSessions: board.unknownSessions ?? 0,
           queuedProposals: proposals.queue?.depth ?? 0,
           approvedProposals: proposalCounts.queued ?? 0,
@@ -1567,7 +1572,18 @@ export class RouterService {
     if (this.deps.installListener === false) return;
     if (typeof this.ctx.on !== 'function') return;
     try {
-      const disposer = this.ctx.on('session/event', (event) => this.handleSessionEvent(event), { prepend: false });
+      // R4.4: the real host emits `session/event` as TWO positional args
+      // `(session, event)` (recorded DSH logs, 2026-11-06), while several
+      // shipped tests drive the legacy one-arg envelope. Accept both arities:
+      // two-arg -> event is arg 2 and arg 1 is the session; one-arg -> arg 1 is
+      // the event (which may still carry `.session` inside).
+      const listener = (...args) => {
+        const twoArg = args.length >= 2 && args[1] != null;
+        const event = twoArg ? args[1] : args[0];
+        const session = twoArg ? args[0] : null;
+        return this.handleSessionEvent(event, session);
+      };
+      const disposer = this.ctx.on('session/event', listener, { prepend: false });
       if (typeof disposer === 'function') this.listenerDisposers.push(disposer);
     } catch (error) {
       this.#log('warn', `session/event listener install failed: ${errorMessage(error)}`);
@@ -1699,9 +1715,9 @@ export class RouterService {
     }
   }
 
-  #onTurnEnd(event, via) {
+  #onTurnEnd(event, via, sessionArg = null) {
     if (this.disposed) return;
-    const session = this.#sessionOfEvent(event);
+    const session = sessionArg ?? this.#sessionOfEvent(event);
     const id = sessionIdOf(session) ?? sessionIdOf(event);
     if (!id) return;
     const header = session?.header ?? {};
@@ -1740,20 +1756,20 @@ export class RouterService {
     }
   }
 
-  #handleLiveEvent(event) {
+  #handleLiveEvent(event, sessionArg = null) {
     const type = event?.type;
     if (type === 'session/created') {
-      this.#onSessionCreated(this.#sessionOfEvent(event), 'session/event');
+      this.#onSessionCreated(sessionArg ?? this.#sessionOfEvent(event), 'session/event');
       return true;
     }
     if (type === 'turn/end') {
-      this.#onTurnEnd(event, 'turn/end');
+      this.#onTurnEnd(event, 'turn/end', sessionArg);
       return true;
     }
     if (type === 'agent/status') {
       const status = event?.data?.state ?? event?.data?.status ?? event?.status;
       if (status === 'idle') {
-        this.#onTurnEnd(event, 'agent/status');
+        this.#onTurnEnd(event, 'agent/status', sessionArg);
         return true;
       }
     }
@@ -1764,10 +1780,10 @@ export class RouterService {
    * turn/end 唤醒：只认 reason.kind === 'completed'，2 秒防抖 + 5 分钟合并。
    * 返回 {scheduled, coalesced?, debounced?, ignored?}，方便单测。
    */
-  handleSessionEvent(event) {
+  handleSessionEvent(event, session = null) {
     // L1 heartbeat runs for every turn boundary, independent of reflectOnTurn
     // and of reason.kind (an aborted turn still ends).
-    try { this.#handleLiveEvent(event); } catch (error) {
+    try { this.#handleLiveEvent(event, session); } catch (error) {
       this.#log('warn', `live heartbeat failed: ${errorMessage(error)}`);
     }
     const type = event?.type;

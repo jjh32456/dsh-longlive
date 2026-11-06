@@ -198,7 +198,7 @@ export async function runLiveSuite({ runCase, runAsyncCase, runSymlinkCase, asse
   });
 
   // L1 — round-trip, exact field set, patch semantics, goal truncation.
-  runCase('L1', '写读往返：14 字段齐全，patch 保留旧值，goal 截断并标注', () => {
+  runCase('L1', '写读往返：15 字段齐全，patch 保留旧值，goal 截断并标注', () => {
     const root = newRoot(TMP, 'l1');
     const sessionId = 's-l1';
     const longGoal = '一二三四五六七八九十'.repeat(9); // 90 code points
@@ -231,17 +231,19 @@ export async function runLiveSuite({ runCase, runAsyncCase, runSymlinkCase, asse
     // that drops a field pass, because the expectation would move with it.
     const DOCUMENTED_FIELDS = [
       'schemaVersion', 'sessionId', 'pid', 'host', 'startedAt', 'updatedAt', 'heartbeatAt',
-      'ttlMs', 'state', 'turn', 'goal', 'blocked_on', 'queued', 'last_action',
+      'ttlMs', 'state', 'turn', 'goal', 'goalUpdatedAt', 'blocked_on', 'queued', 'last_action',
     ];
     assert(
       JSON.stringify(Object.keys(stored)) === JSON.stringify(DOCUMENTED_FIELDS),
-      `stored row must be exactly the 14 documented fields in order, got ${JSON.stringify(Object.keys(stored))}`,
+      `stored row must be exactly the 15 documented fields in order, got ${JSON.stringify(Object.keys(stored))}`,
     );
     assert(stored.schemaVersion === LIVE_SCHEMA_VERSION, 'schemaVersion');
     assert(stored.pid === process.pid, 'pid must be the writing process');
     assert(stored.host === HOST, 'host must be this machine');
     assert(stored.startedAt === iso(NOW), 'startedAt = now');
     assert(stored.updatedAt === iso(NOW) && stored.heartbeatAt === iso(NOW), 'updatedAt/heartbeatAt = now');
+    // R3: the goal has its own clock; a heartbeat touch must never move it.
+    assert(stored.goalUpdatedAt === iso(NOW), 'goalUpdatedAt = the goal write time');
     assert(stored.state === 'blocked', 'state');
     assert(stored.turn === 7, 'turn');
     assert(stored.blocked_on === 'waiting for review', 'blocked_on while blocked');
@@ -262,6 +264,7 @@ export async function runLiveSuite({ runCase, runAsyncCase, runSymlinkCase, asse
     const patched = second.record;
     assert(patched.turn === 7, 'turn preserved by patch');
     assert(patched.goal === stored.goal, 'goal preserved by patch');
+    assert(patched.goalUpdatedAt === iso(NOW), 'goalUpdatedAt preserved by a goal-less patch');
     assert(JSON.stringify(patched.queued) === JSON.stringify(['a', 'b', 'c']), 'queued preserved');
     assert(patched.blocked_on === '', 'blocked_on emptied');
     assert(patched.startedAt === iso(NOW), 'startedAt preserved across updates');

@@ -58,7 +58,7 @@
 | 压缩分析 | `src/compaction.js` | `shadowedEvents` / `stillStored` / `reclaimed`（磁盘回读才算） | 宿主内（只读） |
 | live 保护 | `src/live-target.js` | 三路判定"会话是否还在跑"；`SESSION_IS_RUNNING`（工具层只 import 其中的 id 辅助函数，不做三路探测） | 宿主内（仅 id 判定）+ CLI |
 | live 注册表 | `src/live.js` | 行读写、effectiveState、prune | 宿主内 |
-| 心跳 | `src/heartbeat.js` | turn 事件 + 15s 定时刷新已绑定行；`0` 关闭 | 宿主内 |
+| 心跳 | `src/heartbeat.js` | turn 边界状态机维护 state/turn + 15s 定时/tool touch 刷新已绑定行；`0` 只关定时与 touch | 宿主内 |
 | 记忆存储 | `src/memory/*.js` | 卡片、索引、巩固、遗忘、程序卡、检索 | 宿主内 |
 | 路径解析 | `src/memory/paths.js` | memoryRoot 五级优先、越界检查、严格模式 | 宿主内 |
 | R1 运行时 | `src/router/runtime.js` | off/shadow/on；只拦 4 个 memory 工具；fail-closed | 宿主内 |
@@ -67,6 +67,7 @@
 | CLI | `scripts/truncate-cli.mjs` | 无工具层的最小切口；自带 live 拒绝 | **宿主外** |
 | doctor | `scripts/longlive-doctor.mjs` | 可选依赖/版本/安装计划；默认只读 | **宿主外** |
 | 面板 | `@jjh32456/dsh-longlive-panel@0.2.6` | 六层视图/截断记录/过滤器决策（未并入，显示样例）/影子记录/常驻 Router，只读 | 独立可选插件 |
+| 共享大脑活动流 | `src/activity/*`（`sharedBrain.activity`，默认关闭） | 事件级写活动行（同 key ≤1 条/10s；turn/end 写结论行）到 `.longlive/board/activity.jsonl`；agent/pre-step 只注入其他会话的增量（判重/蒸馏/500 条窗口）；与 `presenceBus` 解耦 | 宿主内（只写记忆根） |
 | 校验器 | `<tools-dir>\ops\tools\verify-truncation.mjs`（本机示例，不在包内） | V1–V7 结构验收；不写不修 | **宿主外** |
 
 ---

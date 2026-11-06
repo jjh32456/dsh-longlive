@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { VERSION } from '../src/version.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -147,6 +148,21 @@ const suites = [
   {
     label: 'feature flags (node --test)',
     args: ['--test', 'test/feature-flags.test.mjs'],
+    parse: parseNodeTest,
+  },
+  {
+    label: `${VERSION} shared-brain activity stream (node --test)`,
+    args: ['--test', 'test/activity-stream.test.mjs', 'test/activity-realtime.test.mjs'],
+    parse: parseNodeTest,
+  },
+  {
+    label: 'P2 state truth: focus/running/status/turn-state/open-card (node --test)',
+    args: ['--test', 'test/state-truth.test.mjs'],
+    parse: parseNodeTest,
+  },
+  {
+    label: `${VERSION} version consistency (node --test)`,
+    args: ['--test', 'test/version-consistency.test.mjs'],
     parse: parseNodeTest,
   },
   {

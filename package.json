@@ -1,8 +1,8 @@
 {
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "type": "module",
-  "description": "久视（longlive）：一个磁盘上的共享大脑，让每个会话都是同一个你——记忆卡、状态卡、开机卡让新会话接上同一段关系与未完成的事；配套会话卫生（热截断/备份/D2/D6 裁剪）与记忆工具（巩固/召回/程序性记忆）。1.6.4 修复记忆根可移植性（默认根 = <DSH home>/longlive-memory，一处配置贯穿全部落盘），并同步面板 0.2.5 文案与 G1-G4 修复。",
+  "description": "久视（longlive）：一个磁盘上的共享大脑，让每个会话都是同一个你——记忆卡、状态卡、开机卡让新会话接上同一段关系与未完成的事；配套会话卫生（热截断/备份/D2/D6 裁剪）与记忆工具（巩固/召回/程序性记忆）。1.6.8 在 1.6.7 之上并入共享大脑活动流（sharedBrain.activity：事件级活动写入、判重/蒸馏、只带新增的增量注入，默认关闭）与共享板状态诚实性修复（running 计数、焦点新鲜度、turn 状态、开机卡时效）；热截断与 1.6.7 相同。",
   "keywords": [
     "dsh",
     "deepseek-harness",
@@ -55,6 +55,7 @@
   },
   "files": [
     "src/*.js",
+    "src/activity/*.js",
     "src/compaction/*.js",
     "src/ui/*.js",
     "lib/client.js",
@@ -142,6 +143,10 @@
     "test/packaging.test.mjs",
     "test/v4-hardening.test.mjs",
     "test/feature-flags.test.mjs",
+    "test/activity-stream.test.mjs",
+    "test/activity-realtime.test.mjs",
+    "test/state-truth.test.mjs",
+    "test/version-consistency.test.mjs",
     "test/maintenance-schedule.test.mjs",
     "test/host-engine-status.test.mjs",
     "test/metrics.test.mjs",

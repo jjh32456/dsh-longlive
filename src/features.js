@@ -9,6 +9,8 @@
 //   identityCard.enabled  -> agent/pre-step (open card, prepend:true)
 //   autoRecall.enabled    -> agent/pre-step (recall, prepend:false) + session/event
 //   presenceBus.enabled   -> session/event (drain this session's bus inbox)
+//   sharedBrain.activity.enabled -> session/event (write this turn's activity)
+//                              + agent/pre-step (inject other sessions' new rows)
 //   autoMaintenance.enabled -> one unref'd timer to the next local midnight
 //                              (consolidate report + forget dry-run pending list;
 //                              no turn hook, so a failure cannot affect a turn)
@@ -40,6 +42,7 @@ import {
 import { apply as applyAutoRecall } from './recall/index.js';
 import { createBus, normalizeSessionId, shouldAckOnTurnEnd } from './bus/bus.mjs';
 import { createMaintenanceScheduler } from './memory/maintenance.js';
+import { normalizeActivityConfig, registerActivityStream } from './activity/index.js';
 import {
   claimFallbackInjection,
   markReceiptFallbackInjected,
@@ -52,6 +55,9 @@ export const FEATURE_DEFAULTS = Object.freeze({
   autoRecall: Object.freeze({ enabled: false, topK: 3, budgetTokens: 2000, everyNTurns: 6 }),
   identityCard: Object.freeze({ enabled: false, path: '<memoryRoot>/STATE.md', maxChars: 800 }),
   presenceBus: Object.freeze({ enabled: false, pollMs: 3000 }),
+  sharedBrain: Object.freeze({
+    activity: Object.freeze({ enabled: false, injectMaxChars: 300, maxItems: 5 }),
+  }),
   autoMaintenance: Object.freeze({
     enabled: false,
     consolidate: true,
@@ -81,6 +87,8 @@ export function normalizeFeatureConfig(config = {}) {
   const auto = value.autoRecall && typeof value.autoRecall === 'object' ? value.autoRecall : {};
   const identity = value.identityCard && typeof value.identityCard === 'object' ? value.identityCard : {};
   const bus = value.presenceBus && typeof value.presenceBus === 'object' ? value.presenceBus : {};
+  const sharedBrain = value.sharedBrain && typeof value.sharedBrain === 'object' ? value.sharedBrain : {};
+  const activity = sharedBrain.activity && typeof sharedBrain.activity === 'object' ? sharedBrain.activity : {};
   const maintenance = value.autoMaintenance && typeof value.autoMaintenance === 'object'
     ? value.autoMaintenance
     : {};
@@ -104,6 +112,9 @@ export function normalizeFeatureConfig(config = {}) {
       enabled: bool(bus.enabled),
       pollMs: clampInt(bus.pollMs, FEATURE_DEFAULTS.presenceBus.pollMs, 0, 3600000),
       root: text(bus.root),
+    },
+    sharedBrain: {
+      activity: normalizeActivityConfig(activity),
     },
     autoMaintenance: {
       enabled: bool(maintenance.enabled),
@@ -564,6 +575,21 @@ export function registerFeatures(ctx, config = {}, options = {}) {
   if (cfg.presenceBus.enabled) {
     registerPresenceBus(ctx, cfg.presenceBus, memoryRoot, warn);
     enabled.push('presenceBus');
+  }
+
+  if (cfg.sharedBrain.activity.enabled) {
+    if (!memoryRoot) {
+      warn('[longlive] sharedBrain.activity 已开启但没有可解析的 memoryRoot — 已跳过');
+    } else {
+      const stream = registerActivityStream(ctx, cfg.sharedBrain.activity, {
+        memoryRoot,
+        // Test seam only; the host config never carries these.
+        now: config.now,
+        privacyScan: typeof config.activityPrivacyScan === 'function' ? config.activityPrivacyScan : undefined,
+        logger: warn,
+      });
+      if (stream.enabled) enabled.push('sharedBrain.activity');
+    }
   }
 
   if (cfg.autoMaintenance.enabled) {

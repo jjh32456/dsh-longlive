@@ -103,6 +103,9 @@ test('缺省字段回落到 1.6.0 运行时的默认值（对照归一化器，�
   for (const key of ['enabled', 'pollMs']) {
     assert.equal(parsed.presenceBus[key], features.presenceBus[key], `presenceBus.${key}`);
   }
+  for (const key of ['enabled', 'injectMaxChars', 'maxItems']) {
+    assert.equal(parsed.sharedBrain.activity[key], features.sharedBrain.activity[key], `sharedBrain.activity.${key}`);
+  }
   for (const key of ['enabled', 'consolidate', 'forget', 'runOnStart', 'startDelayMs']) {
     assert.equal(parsed.autoMaintenance[key], features.autoMaintenance[key], `autoMaintenance.${key}`);
   }
@@ -198,6 +201,9 @@ test('schema 面：可 toJSON、描述同时有 zh/en、分组可折叠', { skip
   assert.equal(Config.dict.d2.meta.collapse, true, '嵌套块应可折叠');
   assert.equal(Config.dict.d6.meta.collapse, true);
   assert.equal(Config.dict.routerFace.meta.collapse, true);
+  assert.equal(Config.dict.sharedBrain.meta.collapse, true, 'sharedBrain 是折叠块');
+  assert.equal(Config.dict.sharedBrain.dict.activity.dict.enabled.meta.description.zh,
+    '开启共享大脑活动流（默认关闭）。');
 
   assert.equal(Config.dict.memoryRoot.meta.disabled, true, 'memoryRoot 是只读展示字段');
   assert.equal(Config.dict.memRoot.meta.disabled, true);

@@ -30,6 +30,10 @@ export const FOCUS_ACTION_DETAIL_MAX = 60;
 export const LAST_CONCLUSION_MAX = 120;
 export const TIMELINE_MAX = 8;
 export const ROSTER_MAX = 256;
+// R3: a declared goal older than this is no longer "what the session is doing
+// right now". The board says so instead of letting the heartbeat timestamp
+// masquerade as the goal's freshness.
+export const FOCUS_STALE_MS = 30 * 60 * 1000;
 
 const STATE_PRIORITY = Object.freeze({ running: 0, blocked: 1, waiting: 2, idle: 3 });
 
@@ -331,8 +335,37 @@ export function createBoardBuilder(options = {}) {
     if (args.saturated === true) warnings.push('LIVE_ROWS_SATURATED');
 
     const metadata = Array.isArray(args.metadata) ? args.metadata : null;
+    // A host that cannot list sessions (no metadata source) leaves row origin
+    // unknown. A non-empty list is treated as authoritative; an empty/absent
+    // one falls into the fail-safe heuristic below.
+    const metadataAvailable = Array.isArray(metadata) && metadata.length > 0;
     const metaMap = new Map();
     for (const item of metadata ?? []) metaMap.set(item.sessionId, item);
+
+    /**
+     * R4.6: main vs subagent origin for one live row.
+     * With metadata: the host list is authoritative; a row missing from it is
+     * `unknown` (fail-safe: never counted as active/running/focus).
+     * Without metadata: the host contract (verified against real DSH session
+     * dirs on this machine) is root sessions `session-<uuid>` / subagent and
+     * worker sessions bare UUID ids; a bare UUID row is therefore `unknown`
+     * until proven otherwise, everything else stays `main` so a host that
+     * cannot list sessions never silently drops its rows.
+     */
+    const originOfSession = (sessionId) => {
+      if (typeof sessionId !== 'string' || sessionId === '') return 'unknown';
+      if (metadataAvailable) {
+        const meta = metaMap.get(sessionId) ?? null;
+        if (!meta) return 'unknown';
+        return meta.origin === 'subagent' ? 'subagent' : 'main';
+      }
+      return isBareUuidSessionId(sessionId) ? 'unknown' : 'main';
+    };
+    const originMap = new Map();
+    for (const entry of scan.entries) {
+      if (entry.sessionId) originMap.set(entry.sessionId, originOfSession(entry.sessionId));
+    }
+    const originRank = (entry) => originMap.get(entry.sessionId) ?? 'unknown';
 
     const liveEntries = scan.entries.filter((entry) => !entry.corrupt && entry.sessionId);
     const liveMap = new Map(liveEntries.map((entry) => [entry.sessionId, entry]));
@@ -366,26 +399,46 @@ export function createBoardBuilder(options = {}) {
     roster.sort((a, b) => a.sessionId.localeCompare(b.sessionId));
     if (roster.length > ROSTER_MAX) roster.length = ROSTER_MAX;
 
-    const unknownSessions = roster.filter((item) => item.unknown === true && item.origin !== 'subagent').length;
-    const activeEntries = liveEntries.filter((entry) => ACTIVE_STATE_SET.has(entry.effectiveState) && !isSubagent(entry, metaMap));
+    const metadataUnknownSessions = roster.filter((item) => item.unknown === true && item.origin !== 'subagent').length;
+    // Active/focus set: rows we can prove are main sessions and that are not
+    // dead/stale/corrupt (ACTIVE_STATE_SET is exactly the declared-state band).
+    const activeEntries = liveEntries.filter((entry) => originRank(entry) === 'main'
+      && ACTIVE_STATE_SET.has(entry.effectiveState));
+    // Rows whose origin we cannot prove: fail-safe — never counted active or
+    // shown in focus, but reported as unknown instead of silently believed
+    // (R4.6 边界：metadata 缺失时的 subagent 行不得再抬高 running/active).
+    const unknownOriginEntries = liveEntries.filter((entry) => originRank(entry) === 'unknown'
+      && ACTIVE_STATE_SET.has(entry.effectiveState));
     // A live row we can see but cannot decode still proves a session exists.
     // DESIGN §9 counts such a row as active (state unknown), while a zero-byte
     // file is an interrupted write and is ignored (and later cleaned).
     const unreadableActive = scan.entries.filter((entry) => entry.corrupt === true
       && entry.sessionId
-      && !isSubagent(entry, metaMap)
+      && originRank(entry) === 'main'
       && fileHasBytes(entry.file)).length;
-    // Subagents are counted only in counts.subagents: they never inflate
-    // activeSessions/unknownSessions and never appear in focus.
+    const unreadableUnknown = scan.entries.filter((entry) => entry.corrupt === true
+      && entry.sessionId
+      && originRank(entry) === 'unknown'
+      && fileHasBytes(entry.file)).length;
+    // Sessions we cannot classify (no metadata + child-shaped id, or a live row
+    // missing from the host's session list) are reported as unknown, never as
+    // running/main. Subagents are counted only in counts.subagents.
+    const unknownSessions = metadataUnknownSessions + unknownOriginEntries.length + unreadableUnknown;
     const allActive = activeEntries.length + unreadableActive;
     if (activeEntries.length > Math.max(1, maxSessions)) warnings.push('FOCUS_LIMITED');
-    const running = liveEntries.filter((entry) => entry.state === 'running').length;
-    const blocked = liveEntries.filter((entry) => entry.state === 'blocked').length;
+    // R4.7: pulse counts share the active/focus set (main sessions, not
+    // dead/stale/corrupt) and count the row's DECLARED state. effectiveState
+    // alone cannot answer this: a fresh heartbeat returns `running` for every
+    // row, so a live declared-blocked row would never count as blocked (the
+    // R4.7 first-round over-fix; RE-R47.1).
+    const running = activeEntries.filter((entry) => entry.state === 'running').length;
+    const blocked = activeEntries.filter((entry) => entry.state === 'blocked').length;
     const subagents = roster.filter((item) => item.origin === 'subagent').length;
 
     const proposals = readProposalSummaries(proposalsDir);
     const countsProposals = proposalCounts(proposals);
     const conclusions = readBridgeConclusions(bridgeDir);
+    const atMs = at.getTime();
 
     const focus = activeEntries
       .map((entry) => {
@@ -395,19 +448,30 @@ export function createBoardBuilder(options = {}) {
         // detail (already capped to 60 chars), skipping lifecycle-only noise.
         const conclusion = conclusions.get(entry.sessionId)
           ?? conclusionFromAction(lastAction);
+        // R3: focus.updatedAt is the goal's own clock; heartbeatAt must never
+        // pretend to be it. Rows that never declared a goal (or rows written
+        // before the goal clock existed) get null — unknown, not fabricated —
+        // and are never marked stale because there is no goal to be stale.
+        const goalUpdatedMs = Date.parse(entry.goalUpdatedAt ?? '');
+        const goalUpdatedAt = Number.isFinite(goalUpdatedMs) ? entry.goalUpdatedAt : null;
+        const declared = goalText !== '';
+        const goalAgeMs = declared && goalUpdatedAt !== null ? Math.max(0, atMs - goalUpdatedMs) : null;
+        const stale = goalAgeMs !== null && goalAgeMs > FOCUS_STALE_MS;
         return {
           sessionId: entry.sessionId,
           goal: goalText || '（未声明）',
-          updatedAt: isoOrNull(entry.heartbeatAt),
+          updatedAt: goalUpdatedAt,
+          goalAgeMs,
+          stale,
           lastAction,
           lastConclusion: lastConclusionOf(conclusion),
           queuedCount: queuedCountOf(entry.queued),
           state: entry.effectiveState,
-          declared: goalText !== '',
+          declared,
         };
       })
       .sort((a, b) => {
-        // DESIGN §3.2: declared goal → running → freshest heartbeat.
+        // DESIGN §3.2: declared goal → running → freshest goal write.
         if (a.declared !== b.declared) return a.declared ? -1 : 1;
         const pa = STATE_PRIORITY[a.state] ?? 9;
         const pb = STATE_PRIORITY[b.state] ?? 9;
@@ -423,7 +487,11 @@ export function createBoardBuilder(options = {}) {
         lastAction: item.lastAction,
         lastConclusion: item.lastConclusion,
         queuedCount: item.queuedCount,
+        // R3.2: the stale flag is the single tree-wide signal (focus item);
+        // omitted when fresh so the persisted 6-field shape is unchanged.
+        ...(item.stale ? { stale: true } : {}),
       }));
+    const focusStale = focus.some((item) => item.stale === true);
 
     const timeline = countsProposals.applied
       .filter((item) => item.title !== '')
@@ -468,7 +536,9 @@ export function createBoardBuilder(options = {}) {
       activeSessions: allActive,
       unknownSessions,
       focusVisible: focus.length,
-      stale: false,
+      // In-memory aggregate of R3 staleness (focus items carry stale:true).
+      // Never persisted: board.json shows it on the individual focus row.
+      stale: focusStale,
       counts: {
         active: allActive,
         running,
@@ -608,9 +678,18 @@ function cleanBoardTmp(boardFile, nowMs) {
   return removed;
 }
 
-function isSubagent(entry, metaMap) {
-  const meta = metaMap.get(entry.sessionId);
-  return meta?.origin === 'subagent';
+/**
+ * R4.6 fail-safe: the host's child-session id shape. Real DSH session dirs on
+ * this machine show root/main sessions as `session-<uuid>` while spawned
+ * subagent/worker sessions get a bare UUID. When the host exposes no session
+ * metadata this is the only honest signal available, so a bare-UUID row is
+ * treated as *unknown origin* (reported in unknownSessions, never counted as
+ * running/active/main). Requires metadata to be certain: with metadata the
+ * host list wins and this heuristic is not consulted.
+ */
+export function isBareUuidSessionId(sessionId) {
+  return typeof sessionId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId);
 }
 
 function verifyBoardWrite(file, board) {
@@ -623,7 +702,8 @@ function verifyBoardWrite(file, board) {
 
 /** Format one focus row for the fixed hint template. */
 export function renderFocusLine(item) {
-  return `- ${item.sessionId} ${item.state ?? ''} · 目标${quoted(item.goal, FOCUS_GOAL_MAX)} · ${timeOf(item.updatedAt)}`;
+  const stale = item?.stale === true ? ' · stale（目标超 30 分钟未更新）' : '';
+  return `- ${item.sessionId} ${item.state ?? ''} · 目标${quoted(item.goal, FOCUS_GOAL_MAX)} · ${timeOf(item.updatedAt)}${stale}`;
 }
 
 export function timeOf(iso) {

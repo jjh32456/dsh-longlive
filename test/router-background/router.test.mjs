@@ -46,6 +46,20 @@ function makeCase({ tasks = [], queueText = null, memory = null, llm = null, rou
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// 「挂住」防线，不依赖墙钟精度：只把无限等待变成显式失败，阈值远高于负载抖动
+// （本套件单测观测到的最高耗时约 2.2s，这里取 10s）。正常路径会清掉定时器。
+async function withHangGuard(promise, ms, label) {
+  let timer = null;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} 超过 ${ms}ms 仍未收敛（疑似 stop/tick 挂住回归）`)), ms);
+  });
+  try {
+    return await Promise.race([promise, guard]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 after(() => {
   try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best effort */ }
 });
@@ -890,11 +904,12 @@ test('P10/P08：iterator.return() 永不 resolve 时 tick 仍能收敛，busy/�
       }
     },
   };
+  const CALL_TIMEOUT_MS = 2000;
   const r = c.router({
     llm,
     maxTokens: 200,
     callMaxTokens: 50,
-    callTimeoutMs: 5000,
+    callTimeoutMs: CALL_TIMEOUT_MS,
     stopTimeoutMs: 500,
     retry: { maxAttempts: 1 },
   });
@@ -905,22 +920,28 @@ test('P10/P08：iterator.return() 永不 resolve 时 tick 仍能收敛，busy/�
   const started = Date.now();
   const stopRes = await r.stop();
   const stopElapsed = Date.now() - started;
-  const tickRes = await tickPromise;
+  const tickRes = await withHangGuard(tickPromise, 10000, 'P10 tick');
   const settleElapsed = Date.now() - started;
 
-  assert.equal(stopRes.timedOut, false, 'stop 不能因为 return() 挂住');
-  // 只量 stop() 本身；旧写法把 tick 收敛也算了进去，CI 抖动时会偶发 551ms。
-  // 断言保留，放宽一个明确的调度余量（stopTimeoutMs + 150ms）。
+  // 真回归防线：旧实现 await iterator.return() 无限期，stop/tick 会一直挂住。
+  // 这里只要求 stop 在单次调用预算（callTimeout，2s 级）内返回，并对 tick 收敛
+  // 给同样量级的上界；**不再**贴着 stopTimeoutMs（500ms）断言——负载下定时器
+  // 回调被调度挤压时 stop 合法地走 timedOut 分支（实测偶发 ~1.3s），那不是回归。
+  // 若 stop 真的挂住（回到 await return()），elapsed 会远超 CALL_TIMEOUT_MS。
   assert.ok(
-    stopElapsed <= 500 + 150,
-    `stop 必须在 stopTimeoutMs（500ms）附近收敛，允许 150ms 调度抖动（实测 ${stopElapsed}ms）`,
+    stopElapsed <= CALL_TIMEOUT_MS,
+    `stop 必须在 callTimeout 预算（${CALL_TIMEOUT_MS}ms）内返回，实测 ${stopElapsed}ms`,
   );
-  assert.ok(settleElapsed < 2000, `tick 必须在 stop 后很快收敛（实测 ${settleElapsed}ms）`);
+  assert.equal(stopRes.state, 'stopped', 'stop 返回后状态必须停在 stopped');
+  assert.equal(r.state, 'stopped');
+  assert.ok(settleElapsed <= CALL_TIMEOUT_MS + 1000, `tick 必须在 stop 后收敛，实测 ${settleElapsed}ms`);
   assert.equal(tickRes.ok, true);
   assert.equal(r.busy, false, 'busy 必须释放');
   assert.equal(r.reservedTokens, 0);
   assert.equal(r.ledger.snapshot().reserved, 0, '预留必须释放，不能泄漏 50');
-  assert.equal(returned, false, '生成器 finally 可能来不及跑，但 tick 不能等它');
+  // `returned` 只作诊断：生成器 finally 可能来得及跑、也可能被丢下；关键是
+  // stop/tick 不许等它——上面的时间上界就是这条防线，故不在此断言它的值。
+  void returned;
   await r.dispose();
 });
 
@@ -942,22 +963,33 @@ test('P08：正常 abort 时消费端走到 drain 并关闭迭代器（finally �
       }
     },
   };
+  const CALL_TIMEOUT_MS = 2000;
   const r = c.router({
     llm,
     maxTokens: 200,
     callMaxTokens: 50,
-    stopTimeoutMs: 500,
+    callTimeoutMs: CALL_TIMEOUT_MS,
+    // 2s 预算：正常 abort 的 drain 是确定性的，不该由 500ms 定时器抖动决定成败。
+    stopTimeoutMs: 2000,
     retry: { maxAttempts: 1 },
   });
   r.start();
   const tickPromise = r.tick();
   await sleep(40);
+  const started = Date.now();
   const stopRes = await r.stop();
-  await tickPromise;
+  const stopElapsed = Date.now() - started;
+  const tickRes = await withHangGuard(tickPromise, 10000, 'P08 tick');
 
-  assert.equal(stopRes.timedOut, false);
+  assert.ok(
+    stopElapsed <= CALL_TIMEOUT_MS,
+    `stop 必须在 callTimeout 预算（${CALL_TIMEOUT_MS}ms）内返回，实测 ${stopElapsed}ms`,
+  );
+  assert.equal(stopRes.state, 'stopped');
+  assert.equal(tickRes.ok, true, 'tick 必须收敛（不能被 abort 拖挂）');
   assert.equal(returned, true, 'abort 之后必须真正关闭生成器');
   assert.ok(pulled >= 1);
+  assert.equal(r.busy, false);
   assert.equal(r.ledger.snapshot().reserved, 0);
   await r.dispose();
 });

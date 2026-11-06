@@ -79,3 +79,12 @@
         presenceBus:
           enabled: false
           pollMs: 3000
+        # 1.6.8: shared-brain activity stream (event-level writes, merged from the
+        # 1.6.1-rc.1 batch). Off by default and independent of presenceBus. When on,
+        # activity events append rows to <memoryRoot>/.longlive/board/activity.jsonl
+        # and agent/pre-step injects only rows newer than this session's lastSeenSeq.
+        sharedBrain:
+          activity:
+            enabled: false
+            injectMaxChars: 300
+            maxItems: 5

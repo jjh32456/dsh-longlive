@@ -5,6 +5,10 @@
 > 1.6.3 在 1.6.0 基线上新增**热截断**（cut-only 压缩引擎，见下文「版本与边界」），这一项是 1.5.0
 > 没有的能力；1.6.4 把热截断默认值收到 **300k 触发 / 保留 4 轮**，并修复 D6 重启后首轮冻结
 > （G3）与可移植性收口。升级步骤见 [docs/MIGRATION-1.6.0.md](docs/MIGRATION-1.6.0.md)。
+>
+> 1.6.8 在 1.6.7 之上并入**共享大脑活动流**（`sharedBrain.activity`，默认关闭，与
+> `presenceBus` 解耦，见 [docs/FEATURES.md](docs/FEATURES.md)）与共享板状态诚实性修复
+> （running 计数、焦点新鲜度、turn 状态、开机卡时效）；热截断行为不变。
 
 **一句话**：一个大脑，多双手脚——把「我」从会话里搬出来，让人格与记忆长久化。
 
@@ -81,7 +85,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.7.tgz"
+& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.8.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
@@ -129,8 +133,10 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ## 版本与边界
 
-- 本套文档对应 **1.6.7** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+- 本套文档对应 **1.6.8** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
   1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
+  **1.6.8 并入活动流**：默认关闭的 `sharedBrain.activity`（事件级活动写入 +
+  只注入其他会话新增、整条 ≤300 字；写盘跨进程锁、失败静默），与热截断互不影响。
   **1.6.3 起新增热截断**：一个不调 LLM 的 cut-only 压缩引擎，通过 bundle patch 关掉宿主 stock
   `compaction-basic` 行并插入 `compaction-hot-truncate`；只切「已完成、且早于保留窗口（默认 4 轮 /
   8000 token）」的整轮，切前先把原文归档到 `<memoryRoot>/.longlive/hot-truncate/`，再用一条覆盖率指针

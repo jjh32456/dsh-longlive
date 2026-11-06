@@ -180,6 +180,17 @@ function relativeMinutes(iso, nowMs) {
 }
 
 const RECENT_ACTION_MS = 10 * 60 * 1000;
+// R3.4: the stale flag must be visible in the shared hint, not only in
+// board.json. Same signal as focus.stale:true — the hint never re-judges it.
+const FOCUS_STALE_MINUTES = 30;
+
+/** User-visible stale suffix for one focus row; '' when the goal is fresh. */
+function focusStaleMarker(item, nowMs) {
+  if (!item || item.stale !== true) return '';
+  const age = relativeMinutes(item.updatedAt, nowMs);
+  const goalAge = age === null || age === '刚刚' ? '目标超 30 分钟未更新' : `目标 ${age}写入，超 ${FOCUS_STALE_MINUTES} 分钟未更新`;
+  return ` · stale（${goalAge}）`;
+}
 
 /**
  * L2 presence upgrade: sessions other than this one whose `lastAction.at` moved
@@ -238,6 +249,9 @@ export function renderHint(board, options = {}) {
       // Presence upgrade: 12-char prefix instead of a full opaque session id.
       const sessionId = sessionPrefix(item.sessionId, 12);
       let line = `- ${sessionId} 目标「${goal}」`;
+      // R3.4: stale goals must be visible to the other session, with the goal's
+      // own write time — never silently dropped from the shared hint.
+      line += focusStaleMarker(item, nowMs);
       const action = item.lastAction && typeof item.lastAction === 'object' ? item.lastAction : null;
       if (action) {
         const kind = neutralizeEnvelope(oneLine(action.kind, 24));

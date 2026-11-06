@@ -82,6 +82,9 @@ export const LIVE_RECORD_FIELDS = Object.freeze([
   'state',
   'turn',
   'goal',
+  // R3: the clock of the *goal*, not of the row. A heartbeat touch must never
+  // move it (see liveTouch), and the board renders focus.updatedAt from it.
+  'goalUpdatedAt',
   'blocked_on',
   'queued',
   'last_action',
@@ -410,6 +413,9 @@ function decodeRecord(text, expectedSessionId) {
   }
   const updatedMs = parseTime(raw.updatedAt) ?? heartbeatMs;
   const startedMs = parseTime(raw.startedAt) ?? heartbeatMs;
+  // R3 additive field: rows written before this version simply have no goal
+  // clock; keep it as '' (unknown) instead of inventing one from heartbeatAt.
+  const goalUpdatedMs = parseTime(raw.goalUpdatedAt);
   if (!Array.isArray(raw.queued) || !raw.queued.every((item) => typeof item === 'string')) {
     return { ok: false, reason: 'queued 必须是字符串数组' };
   }
@@ -427,6 +433,7 @@ function decodeRecord(text, expectedSessionId) {
       state: raw.state,
       turn: Number.isInteger(raw.turn) && raw.turn >= 0 ? raw.turn : 0,
       goal: typeof raw.goal === 'string' ? raw.goal : '',
+      goalUpdatedAt: goalUpdatedMs != null ? isoTime(goalUpdatedMs) : '',
       blocked_on: typeof raw.blocked_on === 'string' ? raw.blocked_on : '',
       queued: [...raw.queued],
       last_action: normalizeLastAction(raw.last_action, updatedMs),
@@ -485,6 +492,9 @@ function liveEntry(record, { file, root, now, hostname }) {
     pidAlive: alive,
     turn: record.turn,
     goal: record.goal,
+    // R3: the goal write clock (ISO) or null when the row never declared one.
+    // Never derived from heartbeatAt — that is exactly the lie R3 fixes.
+    goalUpdatedAt: record.goalUpdatedAt === '' ? null : record.goalUpdatedAt,
     blocked_on: record.blocked_on,
     queued: record.queued,
     last_action: record.last_action,
@@ -513,6 +523,7 @@ function corruptEntry({ sessionId, file, root, reason, hostHint = null, hostname
     pidAlive: null,
     turn: null,
     goal: '',
+    goalUpdatedAt: null,
     blocked_on: '',
     queued: [],
     last_action: null,
@@ -852,6 +863,12 @@ export function liveUpdate(args = {}, config = {}) {
   const base = prior.record;
   const created = base == null;
   const goal = fit ? fit.value : (base?.goal ?? '');
+  // R3: `goalUpdatedAt` is the goal's own clock. Only a write that supplies a
+  // goal stamps it; patches and heartbeat touches keep the previous value, so
+  // "目标 30 分钟没更新" can be told apart from "心跳 5 秒前刚动过".
+  const goalUpdatedAt = goalInput !== undefined
+    ? isoTime(now)
+    : (base?.goalUpdatedAt ?? '');
   // blocked_on describes a blocked session; anything else clears it, so a
   // running row cannot keep advertising an obstacle nobody is waiting on.
   const priorBlockedOn = base?.blocked_on ?? '';
@@ -873,6 +890,7 @@ export function liveUpdate(args = {}, config = {}) {
     state,
     turn: turn ?? base?.turn ?? 0,
     goal,
+    goalUpdatedAt,
     blocked_on: blockedOn,
     queued: queued.value,
     last_action: lastAction.value,
@@ -940,8 +958,10 @@ export function liveUpdate(args = {}, config = {}) {
  *   - it never creates a row (`status:'absent'` instead), so merely running a
  *     longlive tool does not fabricate a session row;
  *   - it never repairs/lists corrupt rows (`status:'corrupt'`, bytes untouched);
- *   - it preserves `state`, `goal`, `blocked_on`, `queued`, `turn`, `startedAt`
- *     and `ttlMs`: heartbeat says "this writer is still here", not "state changed";
+ *   - it preserves `state`, `goal`, `goalUpdatedAt`, `blocked_on`, `queued`,
+ *     `turn`, `startedAt` and `ttlMs`: heartbeat says "this writer is still
+ *     here", not "state changed". In particular the goal's own clock must not
+ *     move, or the board could no longer tell a stale goal from a live one;
  *   - `lastAction:false` keeps `last_action` exactly as-is (the timer tick);
  *     otherwise only the action stamp is replaced, bounded like every other write.
  */

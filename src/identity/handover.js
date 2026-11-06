@@ -417,6 +417,41 @@ function allocateBudget(parts, total) {
 }
 
 /**
+ * R6.2: 「状态卡写于 X 分钟前」——X 是 STATE.md mtime 与 now 的差，不是卡片
+ * 生成时间，也不是会话开始时间。拿不到 mtime 时返回 ''（宁可不写，不编造）。
+ * @param {unknown} ageMs
+ * @returns {string}
+ */
+export function stateCardAgeText(ageMs) {
+  if (typeof ageMs !== 'number' || !Number.isFinite(ageMs)) return '';
+  const minutes = Math.max(0, Math.round(ageMs / 60000));
+  return `状态卡写于 ${minutes} 分钟前`;
+}
+
+/**
+ * Resolve the STATE.md age in ms from explicit inputs, falling back to stat()
+ * on `statePath`. Missing/unknown age returns null — the card then omits the
+ * sentence instead of inventing a number.
+ */
+function resolveStateAgeMs(input, safeNow) {
+  if (typeof input.stateAgeMs === 'number' && Number.isFinite(input.stateAgeMs)) {
+    return Math.max(0, input.stateAgeMs);
+  }
+  let mtimeMs = typeof input.stateMtimeMs === 'number' && Number.isFinite(input.stateMtimeMs)
+    ? input.stateMtimeMs
+    : null;
+  if (mtimeMs === null && typeof input.statePath === 'string' && input.statePath.trim() !== '') {
+    try {
+      mtimeMs = fs.statSync(input.statePath).mtimeMs;
+    } catch {
+      mtimeMs = null;
+    }
+  }
+  if (mtimeMs === null) return null;
+  return Math.max(0, safeNow.getTime() - mtimeMs);
+}
+
+/**
  * 生成开机卡。纯函数：所有输入显式传入，方便覆盖缺失/超长/中文路径等边界。
  * @param {{
  *   stateText?: string|null,
@@ -424,11 +459,14 @@ function allocateBudget(parts, total) {
  *   maxChars?: number,
  *   now?: Date|number|string,
  *   statePath?: string,
+ *   stateMtimeMs?: number,
+ *   stateAgeMs?: number,
  *   handoverPath?: string,
  * }} [input]
  * @returns {{
  *   text:string, chars:number, truncated:boolean, warnings:string[],
  *   found:Record<string,boolean>, handoverName:string|null,
+ *   stateAgeMinutes:number|null,
  * }}
  */
 export function buildOpenCard(input = {}) {
@@ -439,6 +477,8 @@ export function buildOpenCard(input = {}) {
     ? input.now
     : new Date(input.now ?? Date.now());
   const safeNow = Number.isFinite(now.getTime()) ? now : new Date();
+  const stateAgeMs = resolveStateAgeMs(input, safeNow);
+  const stateAgeMinutes = stateAgeMs === null ? null : Math.max(0, Math.round(stateAgeMs / 60000));
   const warnings = [];
   const stateText = typeof input.stateText === 'string' ? normalizeText(input.stateText) : '';
   if (input.stateText === null || input.stateText === undefined) warnings.push('STATE_MISSING');
@@ -458,7 +498,8 @@ export function buildOpenCard(input = {}) {
   if (!input.handover) warnings.push('HANDOVER_MISSING');
   else if (handoverText.trim() === '') warnings.push('HANDOVER_EMPTY');
 
-  const header = `【开机卡】${formatCardTime(safeNow)}`;
+  const ageText = stateCardAgeText(stateAgeMs);
+  const header = `【开机卡】${formatCardTime(safeNow)}${ageText === '' ? '' : ` · ${ageText}`}`;
   const headings = {
     where: '▍我在哪',
     waiting: '▍在等什么',
@@ -516,6 +557,7 @@ export function buildOpenCard(input = {}) {
     warnings,
     found: { ...parsed.found, handover: handoverText.trim() !== '' },
     handoverName,
+    stateAgeMinutes,
   };
 }
 
@@ -558,6 +600,14 @@ export function collectOpenCard(options = {}) {
   const errors = [];
   const stateRead = readTextFile(statePath);
   if (!stateRead.ok) errors.push(`STATE_READ_FAILED:${stateRead.error}`);
+  // R6.2: the open card must say how old the state card is. Read the mtime
+  // once here; a missing file leaves it unknown and the sentence is omitted.
+  let stateMtimeMs = null;
+  try {
+    stateMtimeMs = fs.statSync(statePath).mtimeMs;
+  } catch {
+    stateMtimeMs = null;
+  }
 
   let handover = null;
   let handoverPath = null;
@@ -593,6 +643,7 @@ export function collectOpenCard(options = {}) {
     maxChars: options.maxChars,
     now: options.now,
     statePath,
+    stateMtimeMs,
     handoverPath: handoverPath ?? undefined,
   });
 

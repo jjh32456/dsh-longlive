@@ -1,4 +1,4 @@
-﻿# QUICKSTART — 五步跑通（1.6.7）
+﻿# QUICKSTART — 五步跑通（1.6.8）
 
 目标：在一台新机器上，5 步内让 `@jjh32456/dsh-longlive` 装好、能用、能回滚、能卸干净。
 完整背景见 [README.md](README.md)，逐码排错见 [docs/ERRORS.md](docs/ERRORS.md)，
@@ -42,7 +42,7 @@ $DSH = '<DSH 安装目录>\resources\runtime\cli\bin\dsh.cmd'
 先把包放到固定目录，核对 sha256，再装进一个**新 profile**：
 
 ```powershell
-$TGZ = 'C:\path\to\jjh32456-dsh-longlive-1.6.7.tgz'
+$TGZ = 'C:\path\to\jjh32456-dsh-longlive-1.6.8.tgz'
 Get-FileHash -Algorithm SHA256 $TGZ      # 对照同目录的 .tgz.sha256
 
 $LLPROFILE = 'fresh0723b'
@@ -54,7 +54,7 @@ $LLPROFILE = 'fresh0723b'
 & $DSH plugin --profile $LLPROFILE list --depth 0
 ```
 
-`list` 应出现 `@jjh32456/dsh-longlive@1.6.7`。`dsh plugin --profile <新名字> add` 自己也会初始化
+`list` 应出现 `@jjh32456/dsh-longlive@1.6.8`。`dsh plugin --profile <新名字> add` 自己也会初始化
 profile，但那样只带 `@deepseek-ai/dsh-base`；要网页 UI 和与本文一致的验证，先用
 `--from-default-profile web` 建模板 profile。
 
@@ -67,8 +67,8 @@ profile，但那样只带 `@deepseek-ai/dsh-base`；要网页 UI 和与本文一
 ```powershell
 Set-Location <仓库根目录>
 & $NODE test\run.mjs
-& $NODE scripts\pack.mjs --expect-version 1.6.7
-# 产物：dist\jjh32456-dsh-longlive-1.6.7.tgz（+ .sha256）
+& $NODE scripts\pack.mjs --expect-version 1.6.8
+# 产物：dist\jjh32456-dsh-longlive-1.6.8.tgz（+ .sha256）
 ```
 
 `pack.mjs` 只负责打包，不跑测试；`--expect-version` 会在版本不匹配时拒绝出包。
@@ -79,13 +79,13 @@ Set-Location <仓库根目录>
 宿主正在跑、且当前 profile 就是目标 profile 时：
 
 ```
-plugin_manager action=install_bundle target="file:C:/path/to/jjh32456-dsh-longlive-1.6.7.tgz"
+plugin_manager action=install_bundle target="file:C:/path/to/jjh32456-dsh-longlive-1.6.8.tgz"
 ```
 
 目标必须是**绝对路径**，且需要上面说的权限。装完按宿主提示重载（或重启该 profile）。
 
 > 不要用 `npm install` 当安装方式：本包未发布到 npm registry；`file:` 必须指向刚打出来的
-> **1.6.4 tgz**，指向旧版 tgz 会装回旧行为。
+> **1.6.8 tgz**，指向旧版 tgz 会装回旧行为。
 
 ### 1D. 装完第一件事：可选依赖自检与 `--setup`
 
@@ -231,7 +231,7 @@ dsh: warning: 1 entry did not activate
 session-longlive (dsh-session-longlive): Error: cannot get property "version" without inject
 ```
 
-说明跑的是 0.7.3 的旧代码（19 个工具都不会注册）；升级到 1.6.4，或按第 4 步回滚到 0.6.0。
+说明跑的是 0.7.3 的旧代码（19 个工具都不会注册）；升级到 1.6.8，或按第 4 步回滚到 0.6.0。
 
 > **新 profile 要启动两次再下结论。** 新建 profile 的第一次启动会做一次准备性加载，
 > 可能不进入 Cordis runtime，从而掩盖这个错误；第二次启动才是稳定状态。两次 stderr 都干净才算过。
@@ -330,13 +330,13 @@ Remove-Item -Recurse -Force $profileDir
 
 | 现象 | 大概率原因 | 处理 |
 | --- | --- | --- |
-| `dsh: warning: 1 entry did not activate` + `cannot get property "version" without inject` | 0.7.3 的激活回归 | 升级到 1.6.4，或回滚 0.6.0（第 4 步） |
+| `dsh: warning: 1 entry did not activate` + `cannot get property "version" without inject` | 0.7.3 的激活回归 | 升级到 1.6.8，或回滚 0.6.0（第 4 步） |
 | `--dump-config` 里两条同 id 的 `session-longlive` | 在 profile 层照抄了 `- insert:` | 改成 `- id: session-longlive` + `config:`（第 2 步） |
 | `E_MEMORY_ROOT_MISSING` | 显式 `memoryRoot` 目录不存在 | 先建目录，或改用默认根（第 2 步） |
 | `plugin_manager` 安装/卸载被自动拒绝 | 缺少 danger-full-access 或审批 | 用 CLI，或对本次调用批准（第 0 步） |
 | `node` 不是内部或外部命令 | 干净机器 PATH 没有 Node | 用 `$NODE`（第 0 步） |
 | 起会话报 `MISSING_CREDENTIAL` / `ACCOUNT_SIGN_IN_REQUIRED` | 新 profile 没有模型凭据 | 用 3A/3B 验证；这是环境问题，不是插件 |
-| 设置页找不到「久视 · 功能开关」 | 1.6.0 起才有设置页伴侣；旧宿主或没有 webServer 的 profile 不注册路由 | 确认装的是 1.6.4 且宿主 Web GUI 可用；没有路由时直接改 `cordis.patch.yml` |
+| 设置页找不到「久视 · 功能开关」 | 1.6.0 起才有设置页伴侣；旧宿主或没有 webServer 的 profile 不注册路由 | 确认装的是 1.6.8 且宿主 Web GUI 可用；没有路由时直接改 `cordis.patch.yml` |
 
 出问题先看 [docs/ERRORS.md](docs/ERRORS.md)；Windows 专属部分（PowerShell 探测、`request` 模式、
 `Stop-Process` 硬杀关闭）在非 Windows 上会降级而不是崩溃。

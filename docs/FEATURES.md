@@ -1,9 +1,16 @@
-# 1.6.7 可选能力与开关
+# 1.6.8 可选能力与开关
+
+1.6.8 在 1.6.7 之上并入**共享大脑活动流**（`sharedBrain.activity`，默认关闭，与
+`presenceBus` 解耦）与**共享板状态诚实性修复**（board/status/live 的 running 计数、焦点
+新鲜度、turn 状态、开机卡时效）。热截断行为与 1.6.7 相同。
 
 1.6.7 是热截断加固版：turn===0 / 无 turn 记录的组不再永久屏障（含 system/developer 指令的
 原地保留，只含普通消息的随旧前缀整组归档）；中段缺 turn/end 的轮只有最后启动的当前轮不可切；
 新增 onNoPlan 拒绝原因通道，切不了会写 `hot-truncate: 未切（reason）`，不再静默零进展。
 1.6.5 / 1.6.6 的热截断热修复（被宿主重启中断的会话不再永久失去自动切刀）继续生效；其余行为与 1.6.4 相同。
+
+1.6.8 的活动流默认关闭、失败静默，与 `presenceBus` 完全独立；开关、预算与回退见下文
+「`sharedBrain.activity`」与 [CONFIG.md](CONFIG.md) §1.5b。
 
 1.6.4 在 1.6.0 改名基座之上加入**热截断**（cut-only `CompactionEngine`：只切已完成且早于
 保留窗口的整轮，不调 LLM，原始事件不动，只追加一条覆盖率指针；默认 `mode=cut`，自动切达到
@@ -13,7 +20,8 @@
 
 1.6.0 是**改名 + 普适化 + 设置页 + 安全默认**版：包名 `dsh-session-longlive` →
 `@jjh32456/dsh-longlive`，显示名「久视」（英文 Longlive）。在这条改名基座上并入可移植记忆根、
-Config schema（1.6.0 为 80 节点，1.6.4 增加 `hotTruncate` 块后为 85）与设置页客户端，并把 `autoTruncate` / `routerRuntime` / `worker_*`
+Config schema（1.6.0 为 80 节点，1.6.4 增加 `hotTruncate` 块后为 85，本次活动流
+`sharedBrain.activity` 再 +5 为 90）与设置页客户端，并把 `autoTruncate` / `routerRuntime` / `worker_*`
 三个默认值收到发布口径（见下文与 [CONFIG.md](CONFIG.md)）。迁移步骤见
 [MIGRATION-1.6.0.md](MIGRATION-1.6.0.md)。22 个工具的默认表面不变；D2/D6 仍默认关闭。
 全量测试 **1063 passed / 0 failed / 9 skipped**。
@@ -68,6 +76,7 @@ fail-closed 到「不重复注入」并只 warn 一次；30 天以上的 marker 
 | `autoRecall.enabled` | `false` | `agent/pre-step` + `session/event` + `session/disposed` | 从 memoryRoot 的卡片里挑相关段落，作为一条不可见上下文注入本轮 |
 | `identityCard.enabled` | `false` | `agent/pre-step` | 把 `<memoryRoot>/STATE.md` 的开机卡插到第一条真人消息之后 |
 | `presenceBus.enabled` | `false` | `session/event` | 在 turn/end（completed）时消费本会话的 bus 收件箱并落 spool |
+| `sharedBrain.activity.enabled` | `false` | `session/event` + `agent/pre-step` | turn/end 写一条本回合活动到 `.longlive/board/activity.jsonl`；pre-step 只把其他会话新增的活动注入本轮（≤5 条 / 整条 ≤300 字，无新增零 token） |
 | `autoMaintenance.enabled` | `false` | 一条 unref 定时器（无 turn hook） | 每日本地日期变化时跑 consolidate 报告 + forget dry-run 待确认清单 |
 | `metrics.enabled` | `true` | `session/event` | 每轮 turn/end 写一行四层账到 `.longlive/metrics/turns.jsonl`；只度量，不裁剪 |
 | `routerEnabled` | `false` | RouterService + 4 个 `router_*` 工具（`routerProposalEnabled` 时再 +3） | 进程内后台服务：tick、预算账本、提案闸门、L1/L2 活体板、L4 归并、可选唤醒 |
@@ -105,6 +114,11 @@ config:
   presenceBus:
     enabled: false
     pollMs: 3000
+  sharedBrain:
+    activity:
+      enabled: false
+      injectMaxChars: 300
+      maxItems: 5
   autoMaintenance:
     enabled: false
     consolidate: true
@@ -155,6 +169,21 @@ config:
 - 消费结果追加到 `<memoryRoot>/.longlive/bus/spool/<sessionId>.jsonl`，随后
   对每条消息 ack。写 spool 失败就不 ack，宁可重放也不丢消息。
 - 可用 `presenceBus.root` 显式指定 bus 根目录（测试用）。
+
+### `sharedBrain.activity`（共享大脑活动流，默认 `false`）
+
+- 工具/轮次事件到达时用本地规则（不调 LLM）从「本轮用户实质消息 + 助手结论 + 最近工具动作」
+  生成一条 ≤140 字的活动，写进 `<memoryRoot>/.longlive/board/activity.jsonl`；同 key ≤1 条/10s；
+- 同会话最近 10 条内 `key` 相同或文本相似度 ≥0.8 时只 `count+1` / 更新 `last_at`；
+  同 key 连续 3 次或累计 10 次压成一条「阶段：…（N 次，最近 …）」；
+- 每个会话在 `.longlive/bridge/<sessionId>.activity.json` 记 `lastSeenSeq`，每次
+  `agent/pre-step` 只注入 `seq > lastSeenSeq` 的**其他会话**活动，最多 5 条、总长
+  ≤300 字（含固定头尾）；没有新增就**零 token、零写盘**；blocked 优先；
+- 失败静默，不影响 turn；隐私门复用 `src/recall/privacy.mjs`；写盘用跨进程锁 +
+  tmp/fsync/rename，两个会话并发写不会丢行或撞 seq；
+- 与 `presenceBus` 完全独立，关掉一个不影响另一个；回退：`enabled: false` 后重启；
+- 面板：活动流的「谁在干什么」页不在 1.6.8 配套的面板 0.2.6 内（面板侧后续版本 0.2.7 提供）；
+  longlive 包只负责写盘与增量注入。
 
 ### `autoMaintenance`（B1/B2，默认 `false`）
 

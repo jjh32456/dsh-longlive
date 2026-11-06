@@ -137,7 +137,7 @@ test('settings client: slot key is @jjh32456/dsh-longlive#session-longlive (row 
     'client 仍残留未 scoped 的模块 id');
 });
 
-test('Config schema: 85 nodes (1.6.4 adds hotTruncate), safety defaults visible, descriptions in zh+en', { skip: !CONFIG_SCHEMA_AVAILABLE }, () => {
+test('Config schema: 90 nodes (1.6.4 hotTruncate + sharedBrain.activity), safety defaults visible, descriptions in zh+en', { skip: !CONFIG_SCHEMA_AVAILABLE }, () => {
   function countNodes(schema) {
     const dict = schema?.dict;
     if (!dict || typeof dict !== 'object') return 1;
@@ -147,12 +147,14 @@ test('Config schema: 85 nodes (1.6.4 adds hotTruncate), safety defaults visible,
   }
   // The schema object itself is the root, not a field: subtract it so the count
   // matches the configured nodes. 1.6.0 had 80; 1.6.4 adds the hotTruncate
-  // block (1 parent + 4 leaves), so the budget is 85.
-  assert.equal(countNodes(Config) - 1, 85, 'Config schema 节点数必须保持 85');
+  // block (1 parent + 4 leaves) = 85; the rebased activity stream adds
+  // sharedBrain.activity (1 parent + 1 activity + 3 leaves) = 90.
+  assert.equal(countNodes(Config) - 1, 90, 'Config schema 节点数必须保持 90');
 
   const parsed = Config({});
   assert.equal(parsed.autoTruncate.enabled, false);
   assert.equal(parsed.autoTruncate.mode, 'dryrun');
+  assert.equal(parsed.sharedBrain.activity.enabled, false, 'activity stream is off by default');
   assert.match(Config.dict.autoTruncate.dict.enabled.meta.description.zh, /默认关闭/);
   assert.match(Config.dict.routerRuntime.meta.description.en, /default off/);
   assert.equal(Config.dict.memoryRoot.meta.disabled, true);

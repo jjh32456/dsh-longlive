@@ -54,7 +54,7 @@ const ZH = {
   recoverOnStart: '启动时收尾或回滚未完成的可见截断事务（默认开启）。',
   keepEvents: 'session_truncate 默认保留的事件数（默认 20000）。',
   recentWriteWindowMs: '最近写入保护窗口；窗口内拒绝截断（默认 60000 毫秒）。',
-  heartbeatMs: '活跃会话心跳间隔（默认 15000 毫秒；0 关闭自动写入）。',
+  heartbeatMs: '活跃会话心跳间隔（默认 15000 毫秒）。0 只关定时心跳与工具调用触发的写；turn 开始/结束仍按状态机维护 state/turn。',
   routerEnabled: '开启 Router 路由服务：判定工具调用并按策略记录/拦截（默认关闭）。',
   routerRuntime: '路由运行时模式：off / shadow / on（默认 off；要记录判定须显式设 shadow 或 on）。',
   routerProvider: 'Router 使用的 provider；留空则用 deepseek-official。',
@@ -106,6 +106,15 @@ const ZH = {
     enabled: '开启共享大脑总线（默认关闭）。',
     pollMs: '总线轮询间隔（默认 3000 毫秒；0 关闭轮询）。',
     root: '总线根目录；留空则使用记忆根。',
+  },
+  sharedBrain: {
+    $description: '共享大脑活动流：把各会话「正在干什么」写进活动板，每轮只注入未读的新增条目。',
+    activity: {
+      $description: '活动流开关与注入预算（与 presenceBus 无关，失败静默）。',
+      enabled: '开启共享大脑活动流（默认关闭）。',
+      injectMaxChars: '每次注入的总字符上限，含固定头尾（默认 300，范围 60–2000）。',
+      maxItems: '每次最多注入的活动条数（默认 5，范围 1–10）。',
+    },
   },
   autoMaintenance: {
     $description: '每日维护：本地午夜调度 consolidate 报告与 forget 候选清单。',
@@ -162,7 +171,7 @@ const EN = {
   recoverOnStart: 'Finish or roll back an interrupted visible-truncation transaction at startup (on by default).',
   keepEvents: 'Default events kept by session_truncate (20000).',
   recentWriteWindowMs: 'Recent-write guard window; truncation is refused inside it (60000 ms).',
-  heartbeatMs: 'Live-session heartbeat interval (15000 ms; 0 disables automatic writes).',
+  heartbeatMs: 'Live-session heartbeat interval (15000 ms). 0 disables only the timer heartbeat and tool-touch writes; turn start/end still maintain state/turn.',
   routerEnabled: 'Enable the Router service: evaluate tool calls and record/deny them by policy (off by default).',
   routerRuntime: 'Router runtime mode: off / shadow / on (default off; set shadow or on to record evaluations).',
   routerProvider: 'Provider used by Router; empty means deepseek-official.',
@@ -214,6 +223,15 @@ const EN = {
     enabled: 'Enable the shared-brain bus (off by default).',
     pollMs: 'Bus polling interval (default 3000 ms; 0 disables polling).',
     root: 'Bus root directory; empty means the memory root.',
+  },
+  sharedBrain: {
+    $description: 'Shared-brain activity stream: one board row per turn, and only unread rows are injected.',
+    activity: {
+      $description: 'Activity-stream switches and injection budget (independent of presenceBus; failures are silent).',
+      enabled: 'Enable the shared-brain activity stream (off by default).',
+      injectMaxChars: 'Total characters per injection, header/footer included (default 300, range 60–2000).',
+      maxItems: 'Maximum activity rows per injection (default 5, range 1–10).',
+    },
   },
   autoMaintenance: {
     $description: 'Daily maintenance: schedule consolidate reports and forget candidates at local midnight.',
@@ -290,6 +308,14 @@ function schemaOf() {
     enabled: z.boolean().default(false).description(ZH.presenceBus.enabled),
     pollMs: z.number().default(3000).description(ZH.presenceBus.pollMs),
     root: z.string().description(ZH.presenceBus.root),
+  }).collapse();
+
+  const sharedBrain = z.object({
+    activity: z.object({
+      enabled: z.boolean().default(false).description(ZH.sharedBrain.activity.enabled),
+      injectMaxChars: z.number().default(300).description(ZH.sharedBrain.activity.injectMaxChars),
+      maxItems: z.number().default(5).description(ZH.sharedBrain.activity.maxItems),
+    }).collapse(),
   }).collapse();
 
   const autoMaintenance = z.object({
@@ -377,6 +403,7 @@ function schemaOf() {
     autoRecall,
     identityCard,
     presenceBus,
+    sharedBrain,
     autoMaintenance,
     routerFace,
     autoTruncate,
