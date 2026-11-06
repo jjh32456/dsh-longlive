@@ -1,6 +1,6 @@
-# CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
+﻿# CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
-适用版本：**1.6.4**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.6.5**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---

@@ -1,4 +1,4 @@
-# @jjh32456/dsh-longlive — session longevity for DSH
+﻿# @jjh32456/dsh-longlive — session longevity for DSH
 
 中文名：**会话长寿**。给 DeepSeek Harness 的宿主插件。
 
@@ -11,12 +11,12 @@
 五步版见 [QUICKSTART.md](../QUICKSTART.md)。最短路径（tgz 已在手，CLI 不需要会话权限）：
 
 ```powershell
-& $DSH plugin --profile <profile> add "file:C:/path/to/jjh32456-dsh-longlive-1.6.4.tgz"
-& $DSH plugin --profile <profile> list --depth 0      # 应显示 @1.6.4
+& $DSH plugin --profile <profile> add "file:C:/path/to/jjh32456-dsh-longlive-1.6.5.tgz"
+& $DSH plugin --profile <profile> list --depth 0      # 应显示 @1.6.5
 ```
 
 `$DSH` 指 DSH 安装目录里的 `resources\runtime\cli\bin\dsh.cmd`（干净机器的 PATH 里通常没有它）。
-从源码安装则先 `& $NODE scripts\pack.mjs --expect-version 1.6.4`；`$NODE` 指 DSH 安装目录里的
+从源码安装则先 `& $NODE scripts\pack.mjs --expect-version 1.6.5`；`$NODE` 指 DSH 安装目录里的
 `resources\runtime\primary-runtime\dependencies\node\bin\node.exe`（>=20）。
 会话内也可以 `plugin_manager action=install_bundle target="file:<绝对路径>"`，但那需要
 danger-full-access 或逐次批准。

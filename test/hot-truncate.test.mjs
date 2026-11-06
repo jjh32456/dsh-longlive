@@ -395,19 +395,74 @@ test('H2 retainTurns and retainTokens both gate the cut', async () => {
   assert.equal(tokenDominant.surface.nodes.length, 1 + 10);
 });
 
-test('H3 an aborted turn blocks the prefix but never gets cut itself', async () => {
+test('H3 aborted turns never freeze later cuts (and are never cut themselves)', async () => {
   const session = new MockSession();
   for (let turn = 1; turn <= 3; turn += 1) addTurn(session, turn, { completed: false });
   for (let turn = 4; turn <= 9; turn += 1) addTurn(session, turn, { completed: true });
-  const { engine } = engineFor({ archiveDir: caseDir('archive') });
+  addTurn(session, 10, { open: true });
+  // 2026-11-06 hotfix: a restart-aborted prefix used to make the plan null
+  // forever. The fixed planner skips past the aborted turns and still cuts the
+  // completed turns that follow (retain window keeps the last 4 completed).
+  const { engine } = engineFor({ archiveDir: caseDir('archive'), perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
   const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
-  assert.equal(result, null, 'the aborted turn-1 prefix is not a legal completed-only cut');
-  assert.equal(pointerEvents(session).length, 0);
+  assert.ok(result, 'completed turns after the aborted prefix are still cuttable');
+  assert.equal(result.shadowedSeqs.length, 4, 'only turns 4 and 5 (2 surface nodes each) are cut');
+  assert.equal(pointerEvents(session).length, 1);
+  const summary = pointerEvents(session)[0];
+  const pointer = session.events[summary.seq + 1];
+  assert.match(pointer.data.content[0].text, /第 4–5 轮/);
 });
 
 // ---------------------------------------------------------------------------
 // Archive
 // ---------------------------------------------------------------------------
+
+test('H3b mid-turn system node at the head of the span does not freeze later cuts', async () => {
+  // 2026-11-06 second hotfix: the candidate span can start at a turn whose
+  // first surface node is an assistant message and whose later node is a
+  // system/message (host-injected). The old system-node guard trimmed the
+  // span to nothing; the fixed planner keeps that head turn in place and
+  // starts the span after it.
+  const session = new MockSession();
+  for (let turn = 1; turn <= 3; turn += 1) addTurn(session, turn, { completed: false });
+  session.append('turn/start', { turn: 4 });
+  session.append('assistant/message', {
+    turn: 4,
+    step: 1,
+    message: {
+      id: 'assistant-4',
+      role: 'assistant',
+      source: { kind: 'model', provider: 'test', model: 'test' },
+      content: [{ type: 'text', text: '第 4 轮回答（前面是重启中断）' }],
+    },
+  }, { surfaceOp: 'append' });
+  session.append('system/message', {
+    turn: 4,
+    step: 2,
+    message: {
+      id: 'system-4',
+      role: 'system',
+      source: { kind: 'system-prompt' },
+      content: [{ type: 'text', text: 'A host-injected system message mid-turn.' }],
+    },
+  }, { surfaceOp: 'append' });
+  session.append('user/message', {
+    id: 'user-4b',
+    role: 'user',
+    content: [{ type: 'text', text: '第 4 轮用户追问' }],
+    source: { kind: 'user', clientTimeZone: 'Asia/Shanghai' },
+  }, { surfaceOp: 'append' });
+  session.append('turn/end', { turn: 4, reason: { kind: 'completed' } });
+  for (let turn = 5; turn <= 10; turn += 1) addTurn(session, turn, { completed: true });
+  addTurn(session, 11, { open: true });
+  const { engine } = engineFor({ archiveDir: caseDir('archive'), perEvent: 5000, retainTurns: 4, retainTokens: 0, autoMinTokens: 0 });
+  const result = await engine.compactIfNeeded(makeAgent(session), 'pressure', new AbortController().signal);
+  assert.ok(result, 'a mid-turn system node at the span head must not freeze the plan');
+  assert.equal(result.shadowedSeqs.length, 4, 'turns 5 and 6 (2 surface nodes each) are cut');
+  const summary = pointerEvents(session)[0];
+  const pointer = session.events[summary.seq + 1];
+  assert.match(pointer.data.content[0].text, /第 5–6 轮/);
+});
 
 test('H4 archive: atomic JSONL, exact event count, sha256, append-only', async () => {
   const dir = caseDir('archive');

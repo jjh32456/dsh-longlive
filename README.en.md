@@ -1,4 +1,4 @@
-# @jjh32456/dsh-longlive (Longlive)
+﻿# @jjh32456/dsh-longlive (Longlive)
 
 A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back it up, and shrink it safely** before the context window fills up. No standalone UI; no network requests or telemetry in the default configuration (Router / RouterFace / embedding call the provider you configure, only after you enable them).
 ## What you get
@@ -13,7 +13,7 @@ A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back 
 ```powershell
 $DSH  = '<DSH install>\resources\runtime\cli\bin\dsh.cmd'
 $NODE = '<DSH install>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
-& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.4.tgz"
+& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.5.tgz"
 & $DSH plugin --profile desktop list --depth 0
 & $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```

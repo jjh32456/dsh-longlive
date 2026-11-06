@@ -1,4 +1,4 @@
-# @jjh32456/dsh-longlive（久视）
+﻿# @jjh32456/dsh-longlive（久视）
 
 > 1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；1.6.4 起发布名改为 scoped 包
 > `@jjh32456/dsh-longlive`（npm 包名），显示名仍是「久视」（英文 Longlive）；
@@ -81,7 +81,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.4.tgz"
+& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.5.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
@@ -129,7 +129,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ## 版本与边界
 
-- 本套文档对应 **1.6.4** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+- 本套文档对应 **1.6.5** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
   1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
   **1.6.3 起新增热截断**：一个不调 LLM 的 cut-only 压缩引擎，通过 bundle patch 关掉宿主 stock
   `compaction-basic` 行并插入 `compaction-hot-truncate`；只切「已完成、且早于保留窗口（默认 4 轮 /

@@ -409,26 +409,59 @@ export function selectCutPlan(session, options, measurement, helpers = {}) {
   // last positional index that belongs to the prefix.
   let endIndex = -1;
   for (let index = 0; index < boundary; index += 1) endIndex += groups[index].seqs.length;
-  if (endIndex < startIndex) return null;
 
-  // An aborted/unfinished turn is never cut; stop before its surface group.
+  // An aborted/unfinished turn is never cut — but it must not freeze every
+  // later cut either. Keep it in place and start the span after the LAST
+  // aborted/unfinished turn in the prefix, so the completed turns that follow
+  // it stay cuttable. (2026-11-06 hotfix: a restart-aborted turn used to make
+  // selectCutPlan return null forever, so automatic hot-truncate never fired
+  // again on that session.)
+  let skipPast = -1;
   for (let index = 0; index < boundary; index += 1) {
     const group = groups[index];
-    if (group.kind === 'turn' && group.turn !== 0 && !group.completed) {
-      endIndex = Math.min(endIndex, surfaceNodes.indexOf(group.seqs[0]) - 1);
-      break;
+    if (group.kind !== 'turn' || group.turn === 0 || group.completed) continue;
+    const lastPos = surfaceNodes.indexOf(group.seqs[group.seqs.length - 1]);
+    if (lastPos > skipPast) skipPast = lastPos;
+  }
+  if (skipPast >= 0) {
+    startIndex = Math.max(startIndex, skipPast + 1);
+    while (startIndex < surfaceNodes.length) {
+      const type = table.bySeq.get(surfaceNodes[startIndex])?.type;
+      if (type === 'user/message' || type === 'assistant/message') break;
+      startIndex += 1;
     }
   }
+  if (endIndex < startIndex) return null;
 
   // The host tolerates later system nodes inside a replacement range, but this
   // engine promises never to cut one — and never to leave half a turn behind.
-  // A system node inside the candidate span therefore excludes its whole turn.
-  for (let index = startIndex; index <= endIndex; index += 1) {
-    if (table.bySeq.get(surfaceNodes[index])?.type !== 'system/message') continue;
-    const seq = surfaceNodes[index];
-    const owner = groups.find((group) => group.seqs.includes(seq));
-    const ownerStart = owner === undefined ? index : surfaceNodes.indexOf(owner.seqs[0]);
-    endIndex = Math.min(endIndex, ownerStart - 1);
+  // A system node inside the candidate span excludes its whole turn, unless
+  // that turn sits at the head of the span: then keep it in place and start the
+  // span after it (a mid-turn system node must not freeze the plan forever).
+  for (let guard = 0; guard < 64; guard += 1) {
+    let headAfter = null;
+    let cutAt = null;
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      if (table.bySeq.get(surfaceNodes[index])?.type !== 'system/message') continue;
+      const seq = surfaceNodes[index];
+      const owner = groups.find((group) => group.seqs.includes(seq));
+      const ownerStart = owner === undefined ? index : surfaceNodes.indexOf(owner.seqs[0]);
+      const ownerLast = owner === undefined ? index : surfaceNodes.indexOf(owner.seqs[owner.seqs.length - 1]);
+      if (ownerStart <= startIndex) { headAfter = ownerLast + 1; continue; }
+      cutAt = ownerStart - 1;
+      break;
+    }
+    if (headAfter !== null) {
+      startIndex = headAfter;
+      while (startIndex < surfaceNodes.length) {
+        const type = table.bySeq.get(surfaceNodes[startIndex])?.type;
+        if (type === 'user/message' || type === 'assistant/message') break;
+        startIndex += 1;
+      }
+      if (endIndex < startIndex) return null;
+      continue;
+    }
+    if (cutAt !== null) endIndex = Math.min(endIndex, cutAt);
     break;
   }
   if (endIndex < startIndex) return null;
