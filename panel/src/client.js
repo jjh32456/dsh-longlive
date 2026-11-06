@@ -320,18 +320,31 @@ window.__ModuleLoader__.load({
     // 状态词只有这一份显示映射：字段名仍是 running/stale/dead/corrupt，界面上不出现「死」。
     const STATE_LABEL = { running: '运行中', idle: '空闲', stale: '休眠', dead: '已归档', corrupt: '损坏', blocked: '阻塞', waiting: '等待' }
     const STATE_TONE = { running: 'ok', idle: 'mute', stale: 'warn', dead: 'mute', corrupt: 'bad', blocked: 'warn', waiting: 'mute' }
+    // 查表一律走 hasOwn：state 来自磁盘上的 JSON，脏数据里可能是 constructor/__proto__ 这类原型链键，
+    // 直查会把 Object.prototype 上的东西当结果（对象 child / 非法 className / NaN 比较器）。
+    const hasOwnKey = (table, key) => Object.prototype.hasOwnProperty.call(table, key)
+    function stateLabel(state) {
+      if (hasOwnKey(STATE_LABEL, state)) return STATE_LABEL[state]
+      return typeof state === 'string' && state ? state.slice(0, 24) : '—'
+    }
+    function stateTone(state) {
+      return hasOwnKey(STATE_TONE, state) ? STATE_TONE[state] : 'mute'
+    }
 
     // 活体行的显示顺序：运行中最上，空闲次之，其它活动态再往后，已归档（dead）永远最后。
     // 旧顺序按心跳从旧到新排，已归档行最长，会把正在跑/空闲的会话挤到表格下面（2026-11-06 用户当场指出）。
     const LIVE_STATE_RANK = { running: 0, idle: 1, blocked: 2, waiting: 3, stale: 4, corrupt: 5 }
     function liveStateRank(state) {
-      const rank = LIVE_STATE_RANK[state]
+      const rank = hasOwnKey(LIVE_STATE_RANK, state) ? LIVE_STATE_RANK[state] : undefined
       if (rank != null) return rank
       return state === 'dead' ? 9 : 6
     }
+    // 心跳未知（null / 读不到）当「最旧」：排在同档最后，不许冒充最新（红队 v1 RED-01）。
     function liveAgeMs(row) {
       const age = row && row.heartbeatAgeMs
-      return Number.isFinite(Number(age)) ? Number(age) : Number.POSITIVE_INFINITY
+      if (age == null) return Number.POSITIVE_INFINITY
+      const n = Number(age)
+      return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY
     }
     // 先按状态档位，再按心跳（越新越靠前），最后按 sessionId 兜底，保证每次刷新的顺序一致。
     function sortLiveRows(rows) {
@@ -554,16 +567,18 @@ window.__ModuleLoader__.load({
     }
 
     function LiveTable({ rows, emptyText }) {
-      if (!rows || !rows.length) return h('div', { className: 'empty' }, emptyText || '没有活体心跳行（.longlive/live/*.json 为空）')
-      const body = rows.map((r) => h('tr', { key: r.sessionId }, [
+      // 脏数据防线：null / 非对象行直接跳过；key 兜底下标，免得重复 sessionId 触发 React key 警告。
+      const list = Array.isArray(rows) ? rows.filter((r) => r && typeof r === 'object') : []
+      if (!list.length) return h('div', { className: 'empty' }, emptyText || '没有活体心跳行（.longlive/live/*.json 为空）')
+      const body = list.map((r, i) => h('tr', { key: r.sessionId == null ? `row-${i}` : String(r.sessionId) }, [
         h('td', { key: 'id' }, [
-          h('div', { className: 'mono', key: 'a' }, r.shortId || r.sessionId),
+          h('div', { className: 'mono', key: 'a' }, r.shortId || r.sessionId || `row-${i}`),
           r.workspace ? h('div', { className: 'snippet mono', key: 'b' }, r.workspace) : null,
         ]),
         h('td', { key: 'state' }, h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center' } }, [
-          h('span', { className: `chip ${STATE_TONE[r.state] || 'mute'}`, key: 's' }, [
+          h('span', { className: `chip ${stateTone(r.state)}`, key: 's' }, [
             h('span', { className: 'dot', key: 'd' }),
-            STATE_LABEL[r.state] || r.state,
+            stateLabel(r.state),
           ]),
           r.sessionFile === false ? h('span', { className: 'chip warn', key: 'orphan', title: '活体登记指向的会话目录里没有 session.v4.jsonl.zstd' }, '无会话文件') : null,
         ])),
@@ -578,12 +593,28 @@ window.__ModuleLoader__.load({
       return h('table', null, [TH(['会话', '状态', '回合', '心跳', '在做什么']), h('tbody', null, body)])
     }
 
+    // 已归档折叠：默认收起，**收起时不物化表格**（红队 v1 RED-06：折叠只藏 DOM 等于没减负担），
+    // 点开后才挂 LiveTable；<details>/<summary> 保留原生键盘语义与无 JS 时的展开能力。
+    // initialOpen 只给回归测试用（假 React 没法点开 summary），宿主不传。
+    function ArchivedFold({ rows, initialOpen }) {
+      const [open, setOpen] = useState(Boolean(initialOpen))
+      const list = Array.isArray(rows) ? rows.filter((r) => r && typeof r === 'object') : []
+      const onToggle = (e) => setOpen(Boolean(e && e.currentTarget && e.currentTarget.open))
+      return h('details', { className: 'fold', open, onToggle }, [
+        h('summary', null, [
+          h('span', { className: 'chip', key: 'c' }, `已归档 ${list.length} 行`),
+          h('span', { className: 'snippet', key: 'hint' }, '心跳超 4 个心跳周期、读不到，或自报已归档；默认折叠，点开看明细'),
+        ]),
+        open ? h('div', { className: 'foldbody', key: 'body' }, h(LiveTable, { rows: list })) : null,
+      ])
+    }
+
     function PalaceTab({ summary, source }) {
       const badge = h('span', { className: `chip ${source === 'live' ? 'solid' : 'sample'}` }, source === 'live' ? '实时' : '样例')
       const warnings = (summary.warnings || []).map((w) => h('span', { key: w.code, className: 'chip warn' }, w.code))
-      // 先排好序再分两组：活动行直接展开，已归档行（心跳停了）折起来，别让历史把当下挤下去。
+      // 先排好序再分两组：活动行直接展开，已归档行收进折叠，别让历史把当下挤下去。
       const liveRows = sortLiveRows(summary.live)
-      const activeRows = liveRows.filter((r) => !r || r.state !== 'dead')
+      const activeRows = liveRows.filter((r) => r && r.state !== 'dead')
       const archivedRows = liveRows.filter((r) => r && r.state === 'dead')
       return h(React.Fragment, null, [
         h('section', { className: 'section', key: 'layers' }, [
@@ -594,13 +625,7 @@ window.__ModuleLoader__.load({
           h('h2', null, ['活体心跳', h('span', { className: 'chip', key: 'c' }, `${activeRows.length} 个活动`)]),
           h(LiveTable, { rows: activeRows, emptyText: '当前没有运行中或空闲的会话' }),
           archivedRows.length
-            ? h('details', { className: 'fold', key: 'archived' }, [
-              h('summary', null, [
-                h('span', { className: 'chip', key: 'c' }, `已归档 ${archivedRows.length} 行`),
-                h('span', { className: 'snippet', key: 'hint' }, '心跳已停（超过 4×TTL），默认折叠；点开看明细'),
-              ]),
-              h('div', { className: 'foldbody', key: 'body' }, h(LiveTable, { rows: archivedRows })),
-            ])
+            ? h(ArchivedFold, { rows: archivedRows, key: 'archived' })
             : null,
         ]),
         h('div', { className: 'foot', key: 'foot' }, [
@@ -1537,7 +1562,7 @@ window.__ModuleLoader__.load({
     exports.apply = apply
     exports.inject = inject
     // 辅助入口只给回归测试用，宿主不消费
-    exports.__test = { fmtBytes, fmtAge, fmtTime, shortSha, sortLiveRows, liveStateRank, TABS, SAMPLE, components: { Panel, PalaceTab, TruncTab, FilterTab, ShadowTab, RouterTab, RecallTab, HelpTab } }
+    exports.__test = { fmtBytes, fmtAge, fmtTime, shortSha, sortLiveRows, liveStateRank, liveAgeMs, stateLabel, stateTone, TABS, SAMPLE, components: { Panel, PalaceTab, ArchivedFold, TruncTab, FilterTab, ShadowTab, RouterTab, RecallTab, HelpTab } }
 
     return module.exports
   },

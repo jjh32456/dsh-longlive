@@ -182,6 +182,12 @@ async function makeFixture() {
     goal: '三天前的心跳',
   }, null, 2))
 
+  // 脏活体文件（红队 v1 RED-07）：数组 / 非字符串 sessionId / 重复 sessionId 都不该变成表格行
+  await put('memory/.longlive/live/array-ghost.json', '[]')
+  await put('memory/.longlive/live/number-id.json', JSON.stringify({ sessionId: 42, state: 'idle', heartbeatAt: iso(0), ttlMs: 60000 }))
+  await put('memory/.longlive/live/session-dup-3333.json', JSON.stringify({ sessionId: 'session-dup-3333', state: 'idle', heartbeatAt: iso(0), ttlMs: 60000, goal: '重复一' }))
+  await put('memory/.longlive/live/session-dup-4444.json', JSON.stringify({ sessionId: 'session-dup-3333', state: 'idle', heartbeatAt: iso(0), ttlMs: 60000, goal: '重复二' }))
+
   // stale 归档行：必须被忽略
   await put('memory/.longlive/live/session-aaaaaaaa-1111.json.stale-20261103-211438', '{"sessionId":"ghost"}')
 
@@ -522,7 +528,7 @@ async function main() {
       eq(b.totals.cards, 2, 'cards')
       eq(b.totals.journalMonths, 2, 'journalMonths')
       eq(b.totals.procedures, 0, 'procedures')
-      eq(b.totals.live, 2, 'live（stale 归档行必须被忽略）')
+      eq(b.totals.live, 3, 'live（脏文件跳过 + 重复 sessionId 去重后的行数）')
       eq(b.totals.liveRunning, 1, 'liveRunning')
       eq(b.totals.liveDead, 1, 'liveDead')
       eq(b.totals.truncations, 1, 'truncations')
@@ -551,6 +557,14 @@ async function main() {
       eq(dead.state, 'dead', '三天前心跳应为 dead')
       eq(b.live[0] && b.live[0].state, 'running', '第一行必须是运行中（已归档不得排在前面）')
       eq(b.live[b.live.length - 1] && b.live[b.live.length - 1].state, 'dead', '已归档必须排最后')
+      // 红队 v1 RED-07：脏文件不变成行、重复 sessionId 只留一行
+      eq(b.live.filter((x) => x.sessionId === 'session-dup-3333').length, 1, '重复 sessionId 只保留一行')
+      eq(b.live.some((x) => x.sessionId === 'array-ghost' || x.sessionId === '42'), false, '数组文件/非字符串 sessionId 不变成活体行')
+      // 红队 v1 RED-05：L1 与页头「N 个活动」同口径，已归档不把 L1 常亮成「注意」
+      const l1 = b.layers.find((l) => l.id === 'working')
+      eq(l1.count, 2, 'L1 count = 活动行数（不含已归档）')
+      eq(l1.unit, '活动', 'L1 unit')
+      eq(l1.health, 'ok', '有活动行时 L1 health=ok')
       return `live=${b.live.map((x) => `${x.shortId}:${x.state}`).join(', ')}`
     })
   }

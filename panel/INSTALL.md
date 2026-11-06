@@ -24,7 +24,7 @@
 | 面板入口 | 侧栏「潜望镜」→ 整页七个页签 |
 
 七个页签（按面板从左到右）：**六层视图**（先看这里，确认自己接上了：六层记忆 + 活体心跳；
-活体行按 运行中 → 空闲 → 已归档 排序，已归档默认折叠）、
+活体行按 运行中 → 空闲 → 已归档 排序，已归档默认折叠、点开才挂出表格）、
 **过滤器决策**（`.longlive/filter/decisions-*.jsonl`）、
 **影子记录**（`router-runtime.jsonl`，根目录与 `.longlive/` 两处合并）、
 **常驻 Router**（`.longlive/router/` 的 status / board / proposals，只读窗口）、
@@ -144,7 +144,7 @@ dsh plugin --profile desktop remove @jjh32456/dsh-longlive-panel
 ```powershell
 $node = "C:\Users\Administrator\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 & $node .\self-test.mjs       # 58 PASS · 0 FAIL（造 .fixture，跑完自动删）
-& $node .\client-smoke.mjs    # 25 PASS · 0 FAIL（基线）+ 页签 34 PASS + 滚动 2 PASS + 活体排序/折叠 10 PASS
+& $node .\client-smoke.mjs    # 25 PASS · 0 FAIL（基线）+ 页签 34 PASS + 滚动 2 PASS + 活体排序/折叠/脏数据 14 PASS
 & $node --test gap-fixes.test.mjs  # 6 PASS · 0 FAIL（截断记录合并 / shadowRecords 口径回归）
 ```
 

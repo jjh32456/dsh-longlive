@@ -440,6 +440,22 @@ function deepText(node, out = []) {
   return out
 }
 
+// find 也要穿透函数组件（ArchivedFold 也是函数组件），否则找不到 details.fold。
+function findByClassDeep(node, cls) {
+  if (!node || typeof node !== 'object') return null
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const hit = findByClassDeep(n, cls)
+      if (hit) return hit
+    }
+    return null
+  }
+  if (typeof node.type === 'function') return findByClassDeep(node.type(node.props || {}), cls)
+  const cn = node.props && node.props.className
+  if (typeof cn === 'string' && cn.split(/\s+/).includes(cls)) return node
+  return findByClassDeep(node.children, cls)
+}
+
 {
   const liveFixture = [
     { sessionId: 'session-ddead-0002', shortId: 'ddead', state: 'dead', heartbeatAgeMs: 90000000, ttlMs: 60000, turn: 3, goal: '旧会话一', lastAction: null },
@@ -448,13 +464,23 @@ function deepText(node, out = []) {
     { sessionId: 'session-dead2-0002', shortId: 'dead2', state: 'dead', heartbeatAgeMs: 80000000, ttlMs: 60000, turn: 1, goal: '旧会话二', lastAction: null },
   ]
 
-  // 1) 纯函数：状态档位 + 排序
+  // 1) 纯函数：状态档位 + 排序 + 红队 v1 修过的三个边界
   const ranked = client.__test.sortLiveRows(liveFixture).map((r) => r.shortId).join(',')
   ook('live: sortLiveRows = 运行中 → 空闲 → 已归档（已归档内按心跳新→旧）', ranked === 'run11,idle1,dead2,ddead', ranked)
   ook('live: liveStateRank(running=0) 且 dead 排最后（9）', client.__test.liveStateRank('running') === 0 && client.__test.liveStateRank('dead') === 9 && client.__test.liveStateRank('idle') === 1, `running=${client.__test.liveStateRank('running')} idle=${client.__test.liveStateRank('idle')} dead=${client.__test.liveStateRank('dead')}`)
+  ook('live: 原型链键 state 落兜底 rank 6（不命中 Object.prototype）', client.__test.liveStateRank('constructor') === 6 && client.__test.liveStateRank('__proto__') === 6 && client.__test.liveStateRank('toString') === 6, `constructor=${client.__test.liveStateRank('constructor')} __proto__=${client.__test.liveStateRank('__proto__')}`)
+  ook('live: 心跳未知（null/NaN）排同档最后，不冒充最新', client.__test.sortLiveRows([
+    { sessionId: 'a-null', state: 'dead', heartbeatAgeMs: null },
+    { sessionId: 'b-500s', state: 'dead', heartbeatAgeMs: 500000 },
+    { sessionId: 'c-900s', state: 'dead', heartbeatAgeMs: 900000 },
+  ]).map((r) => r.sessionId).join(',') === 'b-500s,c-900s,a-null', 'null 心跳应最后')
   ook('live: sortLiveRows 不改原数组', liveFixture.map((r) => r.shortId).join(',') === 'ddead,idle1,run11,dead2', liveFixture.map((r) => r.shortId).join(','))
+  ook('live: stateLabel/stateTone 对原型链键与对象值安全（不出对象 child / 函数 className）', (() => {
+    const bad = ['__proto__', 'constructor', {}, null]
+    return bad.every((s) => typeof client.__test.stateLabel(s) === 'string' && typeof client.__test.stateTone(s) === 'string')
+  })(), `labels=${['__proto__', 'constructor', {}, null].map((s) => JSON.stringify(client.__test.stateLabel(s))).join(',')}`)
 
-  // 2) 渲染：活动行在上、已归档折进 <details>，默认折叠
+  // 2) 渲染（收起态）：活动行在上、已归档折进 <details>，**收起时表格不物化**
   const liveSummary = { generatedAt: new Date().toISOString(), layers: [], live: liveFixture, warnings: [] }
   let tree = null
   let text = ''
@@ -466,17 +492,34 @@ function deepText(node, out = []) {
   }
   const posRun = text.indexOf('run11')
   const posIdle = text.indexOf('idle1')
-  const posDead = text.indexOf('dead2')
-  ook('live: 渲染顺序 运行中 在 空闲 之前、已归档在最后', posRun >= 0 && posIdle > posRun && posDead > posIdle, `run11=${posRun} idle1=${posIdle} dead2=${posDead}`)
+  ook('live: 活动区顺序 运行中 在 空闲 之前', posRun >= 0 && posIdle > posRun, `run11=${posRun} idle1=${posIdle}`)
 
-  const fold = findByClass(tree, 'fold')
+  const fold = findByClassDeep(tree, 'fold')
   ook('live: 已归档有折叠容器（details.fold）', Boolean(fold) && fold.type === 'details', fold && String(fold.type))
-  ook('live: 已归档默认折叠（details 没有 open）', Boolean(fold) && !('open' in (fold.props || {})) && !fold.props.open, fold ? JSON.stringify(fold.props) : '无折叠节点')
-  const foldText = fold ? deepText(fold).join('\n') : ''
-  ook('live: 折叠里装着两条已归档行', foldText.includes('dead2') && foldText.includes('ddead'), foldText.slice(0, 80))
-  ook('live: 活动区不重复渲染已归档行', text.split('dead2').length - 1 === 1, `dead2 出现 ${text.split('dead2').length - 1} 次`)
+  ook('live: 已归档默认折叠（open=false）', Boolean(fold) && !fold.props.open, fold ? JSON.stringify(fold.props) : '无折叠节点')
+  ook('live: 收起时不物化归档表格（dead 行不在树里）', text.indexOf('dead2') < 0 && text.indexOf('ddead') < 0, `dead2=${text.indexOf('dead2')} ddead=${text.indexOf('ddead')}`)
   ook('live: 页头显示活动行数（2 个活动）', text.includes('2 个活动'), text.split('\n').filter((l) => l.includes('活动')).join(' | '))
-  ook('live: 折叠标题写明条数与原因', Boolean(foldText) && foldText.includes('已归档 2 行') && foldText.includes('心跳已停'), foldText.slice(0, 100))
+  ook('live: 折叠标题写明条数与原因（不含未解释的 TTL 缩写）', text.includes('已归档 2 行') && text.includes('心跳超 4 个心跳周期') && !text.includes('TTL'), text.split('\n').filter((l) => /已归档|心跳/.test(l)).join(' | '))
+
+  // 3) 展开态：ArchivedFold(initialOpen=true) 才挂出归档表格（含两条）
+  let foldOpenText = ''
+  try {
+    foldOpenText = deepText(C2.ArchivedFold({ rows: [liveFixture[0], liveFixture[3]], initialOpen: true })).join('\n')
+  } catch (e) {
+    hfail('render: ArchivedFold(展开)', e)
+  }
+  ook('live: 展开后归档表格才出现（dead2/ddead 各一次）', foldOpenText.includes('dead2') && foldOpenText.includes('ddead'), foldOpenText.slice(0, 80))
+
+  // 4) 脏数据防线：null 行不炸整页（红队 v1 RED-04）
+  let nullOk = false
+  let nullErr = ''
+  try {
+    deepText(C2.PalaceTab({ summary: { ...liveSummary, live: [null, liveFixture[2]] }, source: 'live' }))
+    nullOk = true
+  } catch (e) {
+    nullErr = `${e.constructor.name}: ${e.message}`
+  }
+  ook('live: summary.live 含 null 行时不抛（坏一行不毁整页）', nullOk, nullErr || '不抛')
 }
 
 // ---- 输出 ----

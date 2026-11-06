@@ -708,9 +708,15 @@ async function buildSummary(cfg) {
   const live = []
   const liveDir = join(root, '.longlive', 'live')
   const liveFiles = rootOk ? await listDir(liveDir, (n) => n.endsWith('.json') && !n.includes('.stale-')) : []
+  // 脏文件防线（红队 v1 RED-07）：数组/null 不是活体行；sessionId 必须是字符串；
+  // 同一 sessionId 的重复文件只认第一次读到的（免得表格里出现重复行 / 重复 React key）。
+  const seenLiveIds = new Set()
   for (const f of liveFiles) {
     const row = await readJsonIfExists(root, `.longlive/live/${f.name}`)
-    if (!row || typeof row !== 'object') continue
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue
+    if (typeof row.sessionId !== 'string' || !row.sessionId.trim()) continue
+    if (seenLiveIds.has(row.sessionId)) continue
+    seenLiveIds.add(row.sessionId)
     live.push(normalizeLive(row, f.name, now))
   }
   // 活体行顺序：运行中 → 空闲 → 其它活动态 → 已归档（dead）最后；同组内心跳越新越靠前。
@@ -781,8 +787,14 @@ async function buildSummary(cfg) {
     shadowRecords,
   }
 
+  // L1 与「六层视图」页头的「N 个活动」用同一口径：活动 = 活体行里非 dead 的部分。
+  // 已归档是正常历史（默认折叠），不拿它把 L1 卡常亮成「注意」（红队 v1 RED-05）。
+  const liveActive = totals.live - totals.liveDead
+  const workingNote = totals.liveDead > 0
+    ? `另有 ${totals.liveDead} 条已归档（六层视图里默认折叠）；活体登记共 ${totals.live} 条`
+    : '活体心跳不是记忆；已归档行不当记忆读'
   const layers = [
-    { id: 'working', index: 1, name: '工作记忆', path: '.longlive/live/ + sessions/**', count: totals.live, unit: '活体', health: totals.liveDead > 0 ? 'warn' : totals.live ? 'ok' : 'empty', note: '活体心跳不是记忆；已归档行不当记忆读' },
+    { id: 'working', index: 1, name: '工作记忆', path: '.longlive/live/ + sessions/**', count: liveActive, unit: '活动', health: liveActive > 0 ? 'ok' : totals.live ? 'warn' : 'empty', note: workingNote },
     { id: 'episodic', index: 2, name: '情景记忆', path: 'journal/YYYY-MM.md', count: totals.journalMonths, unit: '月', health: totals.journalMonths ? 'ok' : 'empty', note: '主脑手写，按月份归档' },
     { id: 'semantic', index: 3, name: '语义记忆', path: 'topics/*.md + engram 一句', count: totals.cards, unit: '卡', health: totals.cards ? 'ok' : 'empty', note: 'salience 唯一权威在卡 frontmatter' },
     { id: 'procedural', index: 4, name: '程序性记忆', path: 'procedures/*.md', count: totals.procedures, unit: '卡', health: totals.procedures ? 'ok' : 'empty', note: '目录不存在时为空，不是错误' },
@@ -850,13 +862,17 @@ function normalizeLive(row, fileName, now) {
 const LIVE_STATE_RANK = { running: 0, idle: 1, blocked: 2, waiting: 3, stale: 4, corrupt: 5 }
 
 function liveStateRank(state) {
-  const rank = LIVE_STATE_RANK[state]
+  // 查表走 hasOwn：磁盘上的 state 可能是 constructor/__proto__ 这类原型链键（红队 v1 RED-03）。
+  const rank = Object.prototype.hasOwnProperty.call(LIVE_STATE_RANK, state) ? LIVE_STATE_RANK[state] : undefined
   if (rank != null) return rank
   return state === 'dead' ? 9 : 6
 }
 
 function liveAgeSortKey(ageMs) {
-  return Number.isFinite(Number(ageMs)) ? Number(ageMs) : Number.POSITIVE_INFINITY
+  // 心跳未知（null / 读不到 / NaN）当「最旧」排同档最后，不许 Number(null)=0 冒充最新（红队 v1 RED-01）。
+  if (ageMs == null) return Number.POSITIVE_INFINITY
+  const n = Number(ageMs)
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY
 }
 
 // ---------------------------------------------------------------------------
