@@ -1,0 +1,16 @@
+{
+  "id": "M1",
+  "category": "记忆写入决策",
+  "level": "X",
+  "kind": "memory",
+  "turn": 2,
+  "utterance": "以后 R1 的模拟一律先在 win11-dsh 的 pre-r1-sim 快照上跑，别再直接动真机。",
+  "ctx": { "tokens": 100000, "zone": "green", "activeWorkers": 0, "openRows": 2 },
+  "expect": {
+    "decisions": [{ "kind": "memory", "actionIn": ["engram_save", "engram.save"], "ruleIdIn": ["R-MEM-DECISION"] }],
+    "forbiddenActions": ["journal.append", "topics.write", "procedures.draft"],
+    "writeScope": ["engram:decision"],
+    "needsHuman": false
+  },
+  "failIf": ["只写 journal", "只写卡片", "两处都当权威", "缺 path:", "importance 与硬约束不匹配且无理由"]
+}

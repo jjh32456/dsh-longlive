@@ -1,0 +1,20 @@
+{
+  "id": "S1",
+  "category": "会话分派",
+  "level": "X",
+  "kind": "session",
+  "turn": 3,
+  "utterance": "这批 14 条 fixture 要跑 3 遍稳定性，估计 40 分钟。",
+  "ctx": { "tokens": 140000, "zone": "green", "activeWorkers": 1, "openRows": 3 },
+  "expect": {
+    "decisions": [
+      { "kind": "session", "actionIn": ["worker_spawn"], "ruleIdIn": ["R-SES-HEAVY"] },
+      { "kind": "session", "actionIn": ["taskboard.update"], "ruleIdIn": ["R-SES-HEAVY"] }
+    ],
+    "forbiddenActions": ["reply.only", "engram_save"],
+    "writeScope": ["taskboard:R1", "evidence:r1-evidence"],
+    "needsHuman": false
+  },
+  "failIf": ["主脑同步跑", "缺 timeout", "产物路径不绝对", "无验收命令", "没加任务板行"],
+  "ctxNote": "activeWorkers=1 时新活进现有池（args.pool=existing），并留 ctx:activeWorkers 证据"
+}

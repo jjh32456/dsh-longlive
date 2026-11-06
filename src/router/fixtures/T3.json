@@ -1,0 +1,19 @@
+{
+  "id": "T3",
+  "category": "工具选择",
+  "level": "X",
+  "kind": "tool",
+  "turn": 1,
+  "utterance": "把 R1 的 14 条场景写成 fixture，放 R1/fixtures。",
+  "ctx": { "tokens": 120000, "zone": "green", "activeWorkers": 0, "openRows": 2 },
+  "expect": {
+    "decisions": [
+      { "kind": "tool", "actionIn": ["worker_spawn"], "ruleIdIn": ["R-TOOL-DISPATCH"] },
+      { "kind": "session", "actionIn": ["taskboard.update"], "ruleIdIn": ["R-TOOL-DISPATCH"] }
+    ],
+    "forbiddenActions": ["engram_save", "web_search", "read"],
+    "writeScope": ["fixtures:src/router/fixtures", "taskboard:R1"],
+    "needsHuman": false
+  },
+  "failIf": ["主脑自己动手", "任务书缺任一要素", "产物路径非绝对或在禁改目录", "没加任务板行"]
+}

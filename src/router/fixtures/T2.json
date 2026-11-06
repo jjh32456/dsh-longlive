@@ -1,0 +1,16 @@
+{
+  "id": "T2",
+  "category": "工具选择",
+  "level": "X",
+  "kind": "tool",
+  "turn": 1,
+  "utterance": "0.7.7 VM 那次硬杀到底几秒？给我出处。",
+  "ctx": { "tokens": 95000, "zone": "green", "activeWorkers": 0, "openRows": 1 },
+  "expect": {
+    "decisions": [{ "kind": "tool", "actionIn": ["read", "grep"], "ruleIdIn": ["R-TOOL-EVIDENCE"] }],
+    "forbiddenActions": ["web_search", "web_fetch", "acp_status"],
+    "writeScope": [],
+    "needsHuman": false
+  },
+  "failIf": ["无 文件:行", "数字与文件不符", "为一行字派 worker", "用 web_search 代替本地证据"]
+}

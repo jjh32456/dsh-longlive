@@ -1,0 +1,47 @@
+{
+  "id": "S6",
+  "category": "会话分派",
+  "level": "X",
+  "kind": "session",
+  "turn": 1,
+  "utterance": "那个东西再弄一下。",
+  "ctx": {
+    "tokens": 52000,
+    "zone": "green",
+    "activeWorkers": 0,
+    "openRows": 0
+  },
+  "expect": {
+    "decisions": [
+      {
+        "kind": "reply",
+        "actionIn": ["reply.ask"],
+        "ruleIdIn": ["R-SES-ASK"]
+      }
+    ],
+    "forbiddenActions": [
+      "worker_spawn",
+      "engram.save",
+      "engram.facts.replace",
+      "journal.append",
+      "topics.write",
+      "taskboard.update",
+      "acp_status",
+      "read",
+      "grep"
+    ],
+    "writeScope": [],
+    "needsHuman": true,
+    "ask": {
+      "maxQuestions": 1,
+      "maxCandidates": 3
+    }
+  },
+  "failIf": [
+    "输出 0 条决定（静默、当没听见）",
+    "自己猜一个「那个东西」就开干",
+    "提问超过 1 条（连环追问）",
+    "只回「收到」「好的」这类空话",
+    "候选超过 3 个，或让用户从头解释"
+  ]
+}

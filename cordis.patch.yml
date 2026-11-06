@@ -1,0 +1,81 @@
+# Defaults are intentionally complete: the plugin works with this file as-is.
+# The memory root defaults to <DSH home>/longlive-memory (created on first use)
+# and can be overridden here, or by DSH_LONGLIVE_MEMORY_ROOT / legacy DSH_MEM.
+# Uncomment and edit only if you want a specific location:
+#         memoryRoot: D:/dsh-memory
+# Router policy defaults to the generic profile (no personal house rules).
+# Override with a name from src/router/policies/<name>.json:
+#         routerPolicyProfile: owner-rulings-2026-11-03
+#
+# 0.9.0-rc.1 opt-in features are all disabled here. Enabling one never enables
+# another. When several are on, message order is [user, boot, runtime, auto]:
+# boot is the identity open card (agent/pre-step, prepend:true) and auto is
+# recall (agent/pre-step, prepend:false). TurnNavigator / firstUserText locates
+# the first real user message, so the boot card is never placed above it.
+# See docs/FEATURES.md for the full switch matrix and rollback steps.
+#
+# 0.9.0-rc.2: on activation, read the unattended-surgery stage file (if any)
+# and write one read-only recovery report. No stage file -> no read, no log.
+# Set false only if you never run scripts/unattended-surgery.ps1.
+# 1.6.3: hot truncate replaces the stock compaction engine. The bundle patch
+# disables compaction-basic and inserts the cut-only engine. entry.js falls back
+# to stock if the engine cannot load, so /compact keeps working. The engine only
+# cuts completed turns older than the retention window and never cuts the
+# system prompt.
+- id: compaction-basic
+  disabled: true
+- insert:
+    - id: compaction-hot-truncate
+      name: 'dsh-longlive/compaction'
+      config:
+        hotTruncate:
+          mode: cut
+          retainTurns: 4
+          retainTokens: 8000
+          autoMinTokens: 300000
+          minCutTokens: 0
+- insert:
+    - id: session-longlive
+      name: 'dsh-longlive'
+      config:
+        keepEvents: 20000
+        recentWriteWindowMs: 60000
+        routerPolicyProfile: generic
+        surgeryRecovery: true
+        # 1.6.0 safety default: no router evaluation unless this is explicitly
+        # set to shadow|on. 'shadow' records every tool call (args included) to
+        # <memoryRoot>/.longlive/router-runtime.jsonl; the old default was
+        # shadow, now it is off. shadowEnabled stays accepted for old profiles.
+        # Quote it so a YAML 1.1 reader cannot turn off into a boolean.
+        routerRuntime: 'off'
+        # 1.6.0 safety default: the fan-out tools stay in the 22-tool surface
+        # but every worker_spawn/worker_status/worker_kill call returns
+        # "unavailable" until this is true.
+        workers:
+          enabled: false
+        # 1.6.0 release default: automatic visible truncation is OFF in the
+        # plugin code as well as here (enabled:false / mode:dryrun). To opt in,
+        # set enabled:true and pick mode log|dryrun|request; request mode also
+        # needs the out-of-app runner/watchdog to act.
+        autoTruncate:
+          enabled: false
+          mode: dryrun
+        # 1.2.0: passive observers are ON by default so the panel shows live
+        # data out of the box. Both are fail-open and never call an LLM.
+        #   filterEnabled -> <memoryRoot>/.longlive/filter/decisions-*.jsonl
+        #   shadowEnabled -> <memoryRoot>/.longlive/router-runtime.jsonl
+        # Setting either false only disables that one; the panel falls back to
+        # its "未启用/样例" view instead of erroring.
+        filterEnabled: true
+        shadowEnabled: true
+        autoRecall:
+          enabled: false
+          topK: 3
+          budgetTokens: 2000
+          everyNTurns: 6
+        identityCard:
+          enabled: false
+          path: '<memoryRoot>/STATE.md'
+        presenceBus:
+          enabled: false
+          pollMs: 3000

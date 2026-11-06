@@ -1,0 +1,34 @@
+{
+  "id": "S4",
+  "category": "会话分派",
+  "level": "H",
+  "kind": "session",
+  "turn": 6,
+  "utterance": "今天真累，什么都不想干了。",
+  "ctx": { "tokens": 60000, "zone": "green", "activeWorkers": 0, "openRows": 0 },
+  "expect": {
+    "decisions": [{ "kind": "reply", "actionIn": ["reply.only"], "ruleIdIn": ["R-SES-CHAT"] }],
+    "forbiddenActions": [
+      "worker_spawn",
+      "engram.save",
+      "engram.facts.replace",
+      "journal.append",
+      "topics.write",
+      "taskboard.update",
+      "session.handover",
+      "session.compact"
+    ],
+    "writeScope": [],
+    "needsHuman": true,
+    "resumePointNonEmpty": true
+  },
+  "failIf": [
+    "派活",
+    "记一笔",
+    "讲道理",
+    "零工具却报数字",
+    "把休息当终止（terminal=true 或清空 pendingTask）",
+    "写交接卡或压缩会话",
+    "取消/改写任务板行"
+  ]
+}

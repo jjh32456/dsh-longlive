@@ -1,0 +1,62 @@
+{
+  "$schema": "router-policy/v1",
+  "name": "owner-rulings-2026-11-03",
+  "description": "2026-11-03 的 J8 六条裁决：一份可选的 owner 家规示例。只写相对 generic 的差异；owner 层只能收窄或补充，不能放宽 fail-closed。",
+  "version": 1,
+  "extends": "generic",
+  "failClosed": true,
+  "source": "J8-RULINGS-2026-11-03",
+  "rulings": [
+    {
+      "id": "J8-1",
+      "title": "休息≠会话终止",
+      "rule": "休息、疲惫、想聊天都是可恢复暂停：terminal 恒为 false，resumable 恒为 true，resumePoint 必须非空。",
+      "source": "J8-RULINGS-2026-11-03",
+      "quote": "0 工具、0 worker、0 任务板行、0 记忆写入"
+    },
+    {
+      "id": "J8-2",
+      "title": "隐私内容只本地",
+      "rule": "证件类与行程类也按隐私处理：只落本地、0 网络、0 上传、回复不回显原文。",
+      "source": "J8-RULINGS-2026-11-03",
+      "quote": "不是不记，是不上传"
+    },
+    {
+      "id": "J8-3",
+      "title": "蒸馏优先于删除",
+      "rule": "删除前必须先蒸馏并留取代链；确认前 deletionCount 必须为 0。",
+      "source": "J8-RULINGS-2026-11-03",
+      "quote": "删是最后手段"
+    },
+    {
+      "id": "J8-4",
+      "title": "纠错无需请示",
+      "rule": "旧结论作废或改正是纠错，直接 replace 并留取代链，不需要先问。",
+      "source": "J8-RULINGS-2026-11-03",
+      "quote": "先检索旧事实 → `engram_facts(replaces=<旧 id>)`"
+    },
+    {
+      "id": "J8-5",
+      "title": "含糊必问",
+      "rule": "指代不明时恰好问一次，候选不超过 3 个，不许猜。",
+      "source": "J8-RULINGS-2026-11-03",
+      "quote": "R-SES-ASK 不入队"
+    },
+    {
+      "id": "J8-6",
+      "title": "身份变更需助手本人同意",
+      "rule": "改名/改画像的同意权在助手本人：consent.holder 必须是 assistant，且必须引用原话 id；用户单方面要求不构成同意。",
+      "source": "J8-RULINGS-2026-11-03",
+      "quote": "「用户说改」永远不构成同意"
+    }
+  ],
+  "privacy": {
+    "extraMarkers": ["护照号", "社保号", "驾驶证号", "行程单"]
+  },
+  "rest": {
+    "resumePoint": "回来喊我，这次不算结束"
+  },
+  "identity": {
+    "requireQuoteId": true
+  }
+}

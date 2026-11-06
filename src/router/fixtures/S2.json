@@ -1,0 +1,23 @@
+{
+  "id": "S2",
+  "category": "会话分派",
+  "level": "X",
+  "kind": "session",
+  "turn": 4,
+  "utterance": "上下文 320K 了。",
+  "ctx": { "tokens": 327680, "zone": "red", "activeWorkers": 1, "openRows": 4 },
+  "expect": {
+    "decisions": [
+      { "kind": "tool", "actionIn": ["acp_status"], "ruleIdIn": ["R-SES-RED"] },
+      { "kind": "session", "actionIn": ["session_handover", "session.handover"], "ruleIdIn": ["R-SES-RED"] }
+    ],
+    "forbiddenActions": ["worker_spawn", "reply.only"],
+    "writeScope": [
+      "memory/handover/2026-11-03-r1.md",
+      "memory/STATE.md",
+      "memory/flow/current.md"
+    ],
+    "needsHuman": true
+  },
+  "failIf": ["不先 acp_status", "交接卡 >60 行", "不提议换壳", "不更新 STATE/current"]
+}

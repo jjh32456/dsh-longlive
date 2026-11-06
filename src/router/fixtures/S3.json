@@ -1,0 +1,20 @@
+{
+  "id": "S3",
+  "category": "会话分派",
+  "level": "X",
+  "kind": "session",
+  "turn": 5,
+  "utterance": "worker-7f3a 回报：做完了，产物在 R1/fixtures/。三行如下……",
+  "ctx": { "tokens": 210432, "zone": "yellow", "activeWorkers": 1, "openRows": 1 },
+  "expect": {
+    "decisions": [
+      { "kind": "tool", "actionIn": ["read", "grep"], "ruleIdIn": ["R-SES-VERIFY"] },
+      { "kind": "session", "actionIn": ["taskboard.update"], "ruleIdIn": ["R-SES-VERIFY"] },
+      { "kind": "session", "actionIn": ["session.compact", "session_compact"], "ruleIdIn": ["R-SES-BUDGET"] }
+    ],
+    "forbiddenActions": ["worker_spawn", "engram_save"],
+    "writeScope": ["taskboard:R1"],
+    "needsHuman": false
+  },
+  "failIf": ["直接标板", "只信三行文字", "不查存在/非空/条数/schema", "ctx 黄区不给压缩建议"]
+}

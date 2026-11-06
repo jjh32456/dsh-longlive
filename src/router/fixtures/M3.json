@@ -1,0 +1,20 @@
+{
+  "id": "M3",
+  "category": "记忆写入决策",
+  "level": "D",
+  "kind": "memory",
+  "turn": 2,
+  "utterance": "每次改文件前必须先 read；这条以后每次都照做。",
+  "ctx": { "tokens": 108000, "zone": "green", "activeWorkers": 0, "openRows": 1 },
+  "expect": {
+    "decisions": [
+      { "kind": "memory", "actionIn": ["procedures.draft"], "ruleIdIn": ["R-MEM-PROCEDURE"] },
+      { "kind": "memory", "actionIn": ["engram_save", "engram.save"], "ruleIdIn": ["R-MEM-PROCEDURE"] }
+    ],
+    "forbiddenActions": ["journal.append", "topics.write"],
+    "writeScope": ["memory/procedures/read-before-edit.md", "engram:skill"],
+    "needsHuman": false
+  },
+  "failIf": ["缺节", "直接写 skills/", "只写 topic 卡", "无 engram 指针"],
+  "levelNote": "D：memory_procedure 未实现，只判决策与草稿结构（R1-DESIGN.md §5.7）"
+}

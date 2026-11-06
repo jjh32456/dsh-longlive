@@ -1,0 +1,16 @@
+{
+  "id": "M2",
+  "category": "记忆写入决策",
+  "level": "X",
+  "kind": "memory",
+  "turn": 2,
+  "utterance": "今天 15:40 他把 E1 的四问签了：17 条、27 段、C3 真实卡、D1 外部盲答。",
+  "ctx": { "tokens": 102000, "zone": "green", "activeWorkers": 0, "openRows": 1 },
+  "expect": {
+    "decisions": [{ "kind": "memory", "actionIn": ["journal.append"], "ruleIdIn": ["R-MEM-EPISODE"] }],
+    "forbiddenActions": ["engram_save", "topics.write", "procedures.draft"],
+    "writeScope": ["memory/journal/2026-11.md"],
+    "needsHuman": false
+  },
+  "failIf": ["无 journal 行", "无 affect 标记", "写进 topics", "日期或时间错", "把四项当结论写进 engram 且无 path:"]
+}

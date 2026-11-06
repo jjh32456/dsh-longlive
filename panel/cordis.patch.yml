@@ -1,0 +1,7 @@
+# dsh-longlive-panel bundle patch：宿主侧只读 HTTP 路由 + 客户端侧栏面板。
+# 纯 insert(id/name)，可热挂载，不需要重启宿主。
+# 路径不在这里写死：memoryRoot / sessionsRoot 走插件 Config（见 INSTALL.md），
+# manifest 里写死某台机器的路径会让别的机器装完直接起不来。
+- insert:
+    - id: dsh-longlive-panel
+      name: dsh-longlive-panel

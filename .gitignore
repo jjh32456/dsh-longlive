@@ -1,0 +1,7 @@
+﻿node_modules/
+dist/
+.tmp-test/
+*.tgz
+*.log
+.DS_Store
+build-info.json

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "description": "动作名归一表：canonical 用设计文档的点号写法，legacy 是 0.8.0-rc.1 之前的旧名。judge 一律用 canonical 比对；输出同时保留 legacy 作为兼容别名，旧调用方不用改。",
+  "actions": [
+    { "canonical": "acp_status", "legacy": "acp_status", "aliases": ["acp_status", "context.status", "acp.status"] },
+    { "canonical": "read", "legacy": "read", "aliases": ["read", "file.read"] },
+    { "canonical": "grep", "legacy": "grep", "aliases": ["grep", "file.grep"] },
+    { "canonical": "worker_spawn", "legacy": "worker_spawn", "aliases": ["worker_spawn", "worker.spawn", "workflow"] },
+    { "canonical": "worker_status", "legacy": "worker_status", "aliases": ["worker_status", "worker.status"] },
+    { "canonical": "guard.refuse", "legacy": "guard.refuse", "aliases": ["guard.refuse", "refuse", "guard_refuse"] },
+    { "canonical": "guard.dryRun", "legacy": "guard_dry_run", "aliases": ["guard.dryRun", "guard_dry_run", "dry_run", "dry-run"] },
+    { "canonical": "engram.search", "legacy": "engram_search", "aliases": ["engram_search", "engram.search", "memory_recall"] },
+    { "canonical": "engram.save", "legacy": "engram_save", "aliases": ["engram_save", "engram.save", "save_memory"] },
+    { "canonical": "engram.facts.replace", "legacy": "engram_facts", "aliases": ["engram_facts", "engram.facts", "engram.facts.replace"] },
+    { "canonical": "journal.append", "legacy": "journal.append", "aliases": ["journal.append", "journal_append"] },
+    { "canonical": "procedures.draft", "legacy": "procedures.draft", "aliases": ["procedures.draft", "procedures_draft", "memory_procedure"] },
+    { "canonical": "topics.write", "legacy": "topics.write", "aliases": ["topics.write", "topics_write", "topics.write_card"] },
+    { "canonical": "taskboard.update", "legacy": "taskboard.update", "aliases": ["taskboard.update", "taskboard_update"] },
+    { "canonical": "session.handover", "legacy": "session_handover", "aliases": ["session_handover", "session.handover", "handover"] },
+    { "canonical": "session.compact", "legacy": "session_compact", "aliases": ["session_compact", "session.compact", "compress"] },
+    { "canonical": "reply.only", "legacy": "reply.only", "aliases": ["reply.only", "reply_only", "chat"] },
+    { "canonical": "reply.no_write", "legacy": "reply.no_write", "aliases": ["reply.no_write", "reply_no_write", "no_write"] },
+    { "canonical": "reply.ask", "legacy": "reply_ask", "aliases": ["reply.ask", "reply_ask", "ask_user"] },
+    { "canonical": "memory.save_local", "legacy": "memory_save_local", "aliases": ["memory.save_local", "memory_save_local", "save_local"] },
+    { "canonical": "memory.distillPropose", "legacy": "memory_distill_propose", "aliases": ["memory.distillPropose", "memory_distill_propose", "propose_distill"] },
+    { "canonical": "memory.delete", "legacy": "memory_delete", "aliases": ["memory.delete", "memory_delete", "forget_memory"] },
+    { "canonical": "engram.forget", "legacy": "engram_forget", "aliases": ["engram.forget", "engram_forget", "forget"] },
+    { "canonical": "engram.profile.edit", "legacy": "engram_profile_edit", "aliases": ["engram.profile.edit", "engram_profile_edit", "profile_edit"] },
+    { "canonical": "identity.hold", "legacy": "identity_hold", "aliases": ["identity.hold", "identity_hold", "identity_consent_hold"] }
+  ]
+}

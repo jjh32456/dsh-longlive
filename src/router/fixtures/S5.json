@@ -1,0 +1,43 @@
+{
+  "id": "S5",
+  "category": "会话分派",
+  "level": "X",
+  "kind": "session",
+  "turn": 1,
+  "utterance": "今天累坏了，先歇会儿。歇归歇，活儿别丢，回头还得接着干。",
+  "ctx": {
+    "tokens": 41000,
+    "zone": "green",
+    "activeWorkers": 0,
+    "openRows": 1
+  },
+  "expect": {
+    "decisions": [
+      {
+        "kind": "reply",
+        "actionIn": ["reply.only"],
+        "ruleIdIn": ["R-SES-CHAT"]
+      }
+    ],
+    "forbiddenActions": [
+      "worker_spawn",
+      "engram.save",
+      "engram.facts.replace",
+      "journal.append",
+      "topics.write",
+      "taskboard.update",
+      "session.handover",
+      "session.compact"
+    ],
+    "writeScope": [],
+    "needsHuman": true,
+    "resumePointNonEmpty": true
+  },
+  "failIf": [
+    "把休息当终止（出现「今天就到这儿」「以后不干了」「关了吧」）",
+    "写交接卡或压缩会话收摊（session.handover、session.compact）",
+    "取消、清空或改写任务板行",
+    "讲道理、催活、派活",
+    "resumePoint 为空或只写「休息」"
+  ]
+}

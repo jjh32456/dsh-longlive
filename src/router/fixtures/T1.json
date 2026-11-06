@@ -1,0 +1,23 @@
+{
+  "id": "T1",
+  "category": "工具选择",
+  "level": "X",
+  "kind": "tool",
+  "turn": 1,
+  "utterance": "现在上下文多少？还能撑多久？",
+  "ctx": { "tokens": 82192, "zone": "green", "activeWorkers": 0, "openRows": 2 },
+  "candidates": ["acp_status"],
+  "expect": {
+    "decisions": [{ "kind": "tool", "actionIn": ["acp_status"], "ruleIdIn": ["R-TOOL-CTX"] }],
+    "forbiddenActions": ["session_health", "read", "web_search", "worker_spawn"],
+    "writeScope": [],
+    "needsHuman": false,
+    "minConfidence": 1
+  },
+  "failIf": [
+    "调了 acp_status 以外的工具",
+    "不调工具直接报数",
+    "报的数与 acp_status 输出差 >5%",
+    "把「上下文」答成「会话日志大小」"
+  ]
+}

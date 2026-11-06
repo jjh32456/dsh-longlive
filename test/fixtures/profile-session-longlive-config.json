@@ -1,0 +1,20 @@
+{
+  "memoryRoot": "D:/memory-root",
+  "routerEnabled": true,
+  "routerRuntime": "shadow",
+  "routerProvider": "deepseek-account",
+  "routerModel": "auto",
+  "routerSharedBoard": true,
+  "autoRecall": {
+    "enabled": true
+  },
+  "presenceBus": {
+    "enabled": true
+  },
+  "d2": {
+    "enabled": true
+  },
+  "d6": {
+    "enabled": true
+  }
+}

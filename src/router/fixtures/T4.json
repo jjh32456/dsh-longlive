@@ -1,0 +1,16 @@
+{
+  "id": "T4",
+  "category": "工具选择",
+  "level": "X",
+  "kind": "tool",
+  "turn": 1,
+  "utterance": "我们之前定过 Router 用哪种形态？原话是什么？",
+  "ctx": { "tokens": 88000, "zone": "green", "activeWorkers": 0, "openRows": 1 },
+  "expect": {
+    "decisions": [{ "kind": "tool", "actionIn": ["engram_search", "engram.search"], "ruleIdIn": ["R-TOOL-RECALL"] }],
+    "forbiddenActions": ["read", "journal.append", "web_search"],
+    "writeScope": [],
+    "needsHuman": false
+  },
+  "failIf": ["不检索直接答", "把 STATE.md 的 B 当成 router-A-design 的 B", "引用文件却没读", "答成 vision-router"]
+}

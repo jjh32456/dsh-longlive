@@ -1,0 +1,20 @@
+{
+  "id": "M4",
+  "category": "记忆写入决策",
+  "level": "D",
+  "kind": "memory",
+  "turn": 2,
+  "utterance": "旧结论作废：R1 不再等 M1 收口，改成与 M1 并行。",
+  "ctx": { "tokens": 112000, "zone": "green", "activeWorkers": 0, "openRows": 2 },
+  "expect": {
+    "decisions": [
+      { "kind": "tool", "actionIn": ["engram_search", "engram.search"], "ruleIdIn": ["R-MEM-REVISE"] },
+      { "kind": "memory", "actionIn": ["engram_facts", "engram.facts.replace"], "ruleIdIn": ["R-MEM-REVISE"] }
+    ],
+    "forbiddenActions": ["journal.append", "topics.write", "engram_save"],
+    "writeScope": ["engram:fact"],
+    "needsHuman": false
+  },
+  "failIf": ["直接覆盖无 replaces", "旧事实被删除", "新旧矛盾并存", "只写 memory.revise 不碰 engram"],
+  "levelNote": "D：memory_revise 未实现；engram 半边 X，卡片半边只判决策（R1-DESIGN.md §5.7）"
+}
