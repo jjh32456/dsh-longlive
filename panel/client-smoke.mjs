@@ -47,7 +47,7 @@ const sourceText = readFileSync(file, 'utf8').replaceAll('__DSH_PLUGIN_VERSION__
 await import(`data:text/javascript;base64,${Buffer.from(sourceText, 'utf8').toString('base64')}`)
 
 ok('client: 调用了 __ModuleLoader__.load', Boolean(captured))
-ok('client: bundle id 是包名', captured && captured.id === 'dsh-longlive-panel', captured && captured.id)
+ok('client: bundle id 是包名', captured && captured.id === '@jjh32456/dsh-longlive-panel', captured && captured.id)
 
 const requireStub = (id) => {
   if (id === 'react') return React
@@ -76,7 +76,7 @@ const slots = {
 try {
   client.apply({ slots })
   ok('client: 注册 2 个 slot', registered.length === 2, registered.map((r) => r.spec.name).join(','))
-  ok('client: 注册了 main', registered.some((r) => r.spec.name === 'main' && r.spec.key === 'dsh-longlive-panel'))
+  ok('client: 注册了 main', registered.some((r) => r.spec.name === 'main' && r.spec.key === '@jjh32456/dsh-longlive-panel'))
   ok('client: 注册了 sidebar.panellist', registered.some((r) => r.spec.name === 'sidebar.panellist' && r.spec.order === 42 && r.spec.label === '潜望镜'))
 } catch (e) {
   fail('client: apply 注册', e)

@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const ENGRAM = '@kenz1117/dsh-engram';
-const LONGLIVE = 'dsh-longlive';
+const LONGLIVE = '@jjh32456/dsh-longlive';
 const DOCTOR = path.join(ROOT, 'scripts', 'longlive-doctor.mjs');
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 

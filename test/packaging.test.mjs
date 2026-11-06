@@ -144,8 +144,9 @@ test('R2-07 发布版本面：包版本 1.6.4，文档同步 D2/D6 能力集', (
   assert.equal(PKG.version, '1.6.4');
   const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
   const en = read('docs/README.en.md');
-  assert.ok(en.includes('dsh-longlive-panel@0.2.5'), '面板版本未统一到 0.2.5');
-  assert.ok(en.includes('dsh-longlive-1.6.4.tgz'), '英文文档示例 tgz 不是 1.6.4');
+  assert.ok(en.includes('@jjh32456/dsh-longlive-panel@0.2.5'), '面板版本未统一到 0.2.5（scoped 包名）');
+  assert.ok(en.includes('jjh32456-dsh-longlive-1.6.4.tgz'), '英文文档示例 tgz 不是 scoped 的 1.6.4');
+  assert.ok(en.includes('@jjh32456/dsh-longlive'), '英文文档缺少 scoped 包名');
   assert.equal(en.includes('dsh-longlive-panel@0.1.3'), false, '英文文档仍残留 0.1.3');
   assert.equal(en.includes('0.9.0-rc.1'), false, '英文文档仍残留 rc.1');
   const features = read('docs/FEATURES.md');

@@ -19,7 +19,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const DOCTOR = path.join(ROOT, 'scripts', 'longlive-doctor.mjs');
 const ENGRAM = '@kenz1117/dsh-engram';
-const LONGLIVE = 'dsh-longlive';
+const LONGLIVE = '@jjh32456/dsh-longlive';
 
 function writeProfile(home, name, { bundles = [], dependencies = {} } = {}) {
   const dir = path.join(home, 'profiles', name);

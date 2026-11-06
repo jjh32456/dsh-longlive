@@ -1,10 +1,11 @@
-# 插件规格：dsh-longlive（久视）
+# 插件规格：@jjh32456/dsh-longlive（久视）
 
-> 命名（2026-11-06 改）：**dsh-longlive**，显示名「久视」（英文 Longlive）。原名
+> 命名（2026-11-06 改）：发布包名 **@jjh32456/dsh-longlive**（1.6.4 起 scoped 发布名；
+> 1.6.0–1.6.3 为 `dsh-longlive`），显示名「久视」（英文 Longlive）。原名
 > `dsh-session-longlive`（2026-10-30 定），1.6.0 起迁移；拼写是 longlive，不是 longevity。
 >
 > 当前版本：**1.6.4**（1.6.0 改名基座 + 1.6.3 热截断 + 1.6.4 的 300k 触发 / 保留 4 轮与
-> 可移植性收口；D2/D6 默认关闭；安装包 `dist/dsh-longlive-1.6.4.tgz`）。
+> 可移植性收口；D2/D6 默认关闭；安装包 `dist/jjh32456-dsh-longlive-1.6.4.tgz`）。
 
 ## 零、安全性承诺（2026-10-30 要求：不能出错，出错就死了）
 
@@ -115,7 +116,7 @@ DSH 的 compaction 从不删事件：它追加一条 `compaction/summary` 和一
 ## 六、交付物
 
 ```
-dsh-longlive/
+@jjh32456/dsh-longlive/
   package.json          # engines.dsh ">=0.2.0 <1.0.0"，无运行时 deps；可选 peer @kenz1117/dsh-engram
   cordis.patch.yml      # 插进 profile
   src/index.js          # 插件入口：config schema / timer / tools
@@ -140,7 +141,7 @@ dsh-longlive/
 
 ## 八、开放问题（等用户拍）
 
-1. ~~插件名~~**已定（2026-11-06 改）**：包名 `dsh-longlive`（不加 @local 前缀；`private` 先留，发不发 npm 由用户决定），显示名「久视」（英文 Longlive），description 以「久视（longlive）」开头，README 首行 `# dsh-longlive（久视）`。原名 `dsh-session-longlive`（2026-10-30 拍）于 1.6.0 迁移，历史决策保留如下：description 曾为 `Session longevity for DeepSeek Harness — health, verified backup, and safe log truncation.`，中文名「会话长寿」。名字用 longlive（好记、能传播），描述用 longevity（意思准）。
+1. ~~插件名~~**已定（2026-11-06 改，1.6.4 收口）**：发布名 `@jjh32456/dsh-longlive`（scoped 包，`publishConfig.access=public`；`private` 先留，发不发 npm 由用户决定），显示名「久视」（英文 Longlive），description 以「久视（longlive）」开头，README 首行 `# @jjh32456/dsh-longlive（久视）`。原名 `dsh-session-longlive`（2026-10-30 拍）于 1.6.0 迁移，历史决策保留如下：description 曾为 `Session longevity for DeepSeek Harness — health, verified backup, and safe log truncation.`，中文名「会话长寿」。名字用 longlive（好记、能传播），描述用 longevity（意思准）。
 2. **追加验收 T7（必须）**：真机 resume。临时 `DSH_HOME` + 切片副本跑 `dsh headless --session-id <id> "只回两个字：收到"` 必须成功。原因：2026-10-30 的切片模块层全过，真机却报 `invalid persisted inbox splice at session seq 1`——切点从 turn 中间起、开头带 `agent/inbox/spliced`。切点必须落在真正 turn 边界，开头不许有 inbox 事件。
 2. 默认阈值：黄 150 MB / 红 300 MB / 保留 20,000 事件 —— 是否调？
 3. ~~设置页 GUI 若宿主 client 插件机制不允许（本机 0.2.x 未知），首版是否接受"只有工具 + CLI"？~~
@@ -199,5 +200,5 @@ src/memory/
 
 `test/memory.test.mjs` 提供 6 个用例，挂在 `test/run.mjs` 的 P6 之前：M1 索引 dry-run/完整性/幂等/人工内容保留；M2 巩固只读；M3 加固 +1/封顶/备份/正文逐字节一致；M4 遗忘 dry-run 零写入、confirm 门、记忆切片行数=移动数；M5 六条越界路径全部 `E_PATH_OUTSIDE_ROOT`；M6 严格模式下 `memoryRoot` 未配置时四个工具全部 `E_MEMORY_ROOT_UNSET`（默认根行为由 `PORT1`–`PORT3` 覆盖）。`test/portability.test.mjs` 另提供 PORT1–PORT5：默认根创建、优先级链、严格/缺失语义、宿主版本区间、随包代码与脚本零本机路径（PORT5 递归扫描 `src/**`（按 `files` 白名单）、`scripts/`、`test/`，并扫描根目录随包文件与 `docs/ERRORS.md`；其余 `docs/` 不在扫描清单内，其中标注「本机示例」的示例路径不算违规）。`TOOLS` 注册数为 22。
 
-打包：`node scripts/pack.mjs` 产出 `dist/dsh-longlive-<version>.tgz`；是否发布到 npm registry 由维护者决定
+打包：`node scripts/pack.mjs` 产出 `dist/jjh32456-dsh-longlive-<version>.tgz`；是否发布到 npm registry 由维护者决定
 （当前 registry 上查无此包，安装请用本地 tarball，见 `QUICKSTART.md`）。

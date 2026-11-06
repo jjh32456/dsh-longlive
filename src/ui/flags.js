@@ -8,7 +8,7 @@
 // never carries a second copy.
 
 /** Package name the row key is derived from (see `rowConfigKey` in the Host). */
-export const FLAGS_PACKAGE = 'dsh-longlive';
+export const FLAGS_PACKAGE = '@jjh32456/dsh-longlive';
 /** Row id the shipped cordis.patch.yml declares. */
 export const FLAGS_ROW_ID = 'session-longlive';
 /** Key for `plugins.row.config`: `<package name>#<row id>`. */

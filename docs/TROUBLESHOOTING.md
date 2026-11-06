@@ -43,19 +43,19 @@
 
 **症状**：Web GUI 左侧看不到面板入口。
 
-**最可能原因**：面板是**独立可选包** `dsh-longlive-panel@0.2.5`，这一轮根本没装；
+**最可能原因**：面板是**独立可选包** `@jjh32456/dsh-longlive-panel@0.2.5`，这一轮根本没装；
 或者只 `plugin add` 了、没加进 profile 的 `dsh.profile.bundles`，bundle patch 不生效；
 或者当前 profile 不是 `desktop`、宿主没重启。
 
 **验证（一条）**：
 
 ```powershell
-& dsh --profile desktop --dump-config 2>&1 | Select-String 'dsh-longlive-panel'
+& dsh --profile desktop --dump-config 2>&1 | Select-String '@jjh32456/dsh-longlive-panel'
 ```
 
 **修法**：
-1. 安装独立可选包 `dsh-longlive-panel@0.2.5`（装法见该包的 `INSTALL.md`）；
-2. 在 `$P\package.json` 的 `dsh.profile.bundles` 里加入 `dsh-longlive-panel`；
+1. 安装独立可选包 `@jjh32456/dsh-longlive-panel@0.2.5`（装法见该包的 `INSTALL.md`）；
+2. 在 `$P\package.json` 的 `dsh.profile.bundles` 里加入 `@jjh32456/dsh-longlive-panel`；
 3. 重启宿主，刷新页面。
 （两步缺一不可；只装不加 bundles，patch 不会应用。）
 
@@ -194,8 +194,8 @@ Get-Process 'DeepSeek Harness' -ErrorAction SilentlyContinue | Select-Object Id,
 **验证（一条）**：
 
 ```powershell
-(Get-Content "$P\package.json" -Raw | Select-String 'dsh-longlive').Line;
-(Get-Content "$P\node_modules\dsh-longlive\package.json" -Raw | ConvertFrom-Json).version;
+(Get-Content "$P\package.json" -Raw | Select-String '@jjh32456/dsh-longlive').Line;
+(Get-Content "$P\node_modules\@jjh32456\dsh-longlive\package.json" -Raw | ConvertFrom-Json).version;
 Get-Process 'DeepSeek Harness' | Select-Object Id,StartTime
 ```
 

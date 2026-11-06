@@ -1,6 +1,6 @@
 # QUICKSTART — 五步跑通（1.6.4）
 
-目标：在一台新机器上，5 步内让 `dsh-longlive` 装好、能用、能回滚、能卸干净。
+目标：在一台新机器上，5 步内让 `@jjh32456/dsh-longlive` 装好、能用、能回滚、能卸干净。
 完整背景见 [README.md](README.md)，逐码排错见 [docs/ERRORS.md](docs/ERRORS.md)，
 截断操作与发布自检见 [runbook.md](runbook.md)。
 
@@ -42,7 +42,7 @@ $DSH = '<DSH 安装目录>\resources\runtime\cli\bin\dsh.cmd'
 先把包放到固定目录，核对 sha256，再装进一个**新 profile**：
 
 ```powershell
-$TGZ = 'C:\path\to\dsh-longlive-1.6.4.tgz'
+$TGZ = 'C:\path\to\jjh32456-dsh-longlive-1.6.4.tgz'
 Get-FileHash -Algorithm SHA256 $TGZ      # 对照同目录的 .tgz.sha256
 
 $LLPROFILE = 'fresh0723b'
@@ -54,7 +54,7 @@ $LLPROFILE = 'fresh0723b'
 & $DSH plugin --profile $LLPROFILE list --depth 0
 ```
 
-`list` 应出现 `dsh-longlive@1.6.4`。`dsh plugin --profile <新名字> add` 自己也会初始化
+`list` 应出现 `@jjh32456/dsh-longlive@1.6.4`。`dsh plugin --profile <新名字> add` 自己也会初始化
 profile，但那样只带 `@deepseek-ai/dsh-base`；要网页 UI 和与本文一致的验证，先用
 `--from-default-profile web` 建模板 profile。
 
@@ -68,7 +68,7 @@ profile，但那样只带 `@deepseek-ai/dsh-base`；要网页 UI 和与本文一
 Set-Location <仓库根目录>
 & $NODE test\run.mjs
 & $NODE scripts\pack.mjs --expect-version 1.6.4
-# 产物：dist\dsh-longlive-1.6.4.tgz（+ .sha256）
+# 产物：dist\jjh32456-dsh-longlive-1.6.4.tgz（+ .sha256）
 ```
 
 `pack.mjs` 只负责打包，不跑测试；`--expect-version` 会在版本不匹配时拒绝出包。
@@ -79,7 +79,7 @@ Set-Location <仓库根目录>
 宿主正在跑、且当前 profile 就是目标 profile 时：
 
 ```
-plugin_manager action=install_bundle target="file:C:/path/to/dsh-longlive-1.6.4.tgz"
+plugin_manager action=install_bundle target="file:C:/path/to/jjh32456-dsh-longlive-1.6.4.tgz"
 ```
 
 目标必须是**绝对路径**，且需要上面说的权限。装完按宿主提示重载（或重启该 profile）。
@@ -89,7 +89,7 @@ plugin_manager action=install_bundle target="file:C:/path/to/dsh-longlive-1.6.4.
 
 ### 1D. 装完第一件事：可选依赖自检与 `--setup`
 
-`dsh-longlive` 没有硬依赖。它和 engram 记忆插件（`@kenz1117/dsh-engram`）是**可选协作**：
+`@jjh32456/dsh-longlive` 没有硬依赖。它和 engram 记忆插件（`@kenz1117/dsh-engram`）是**可选协作**：
 装了 engram，`engram_*` 与 `memory_save` 工具才在；不装，这两组工具缺席，但剪对话、备份、截断和
 `memory_*` 卡片工具照常工作。插件启动时只打印一行提示（指向 `--setup`），不会自动安装、不会崩、不会阻塞。
 
@@ -153,7 +153,7 @@ New-Item -ItemType Directory -Force -Path $MEM | Out-Null   # 显式根必须已
 ```
 
 `- insert:` 是包内 `cordis.patch.yml`（bundle 作者层）的写法。把它复制进 profile 会再插一条
-同 id 的 entry，`--dump-config` 里能看到两条 `# == dsh-longlive`；用上面的 `- id:`
+同 id 的 entry，`--dump-config` 里能看到两条 `# == @jjh32456/dsh-longlive`；用上面的 `- id:`
 覆盖才会合并成一条。
 
 三个注意点：
@@ -169,7 +169,7 @@ New-Item -ItemType Directory -Force -Path $MEM | Out-Null   # 显式根必须已
 & $DSH --profile $LLPROFILE --dump-config | Select-String -Pattern 'session-longlive' -Context 1,6
 ```
 
-只应有一条 `# == dsh-longlive`，且 `config` 里是你要的 `memoryRoot`。
+只应有一条 `# == @jjh32456/dsh-longlive`，且 `config` 里是你要的 `memoryRoot`。
 
 ### 2B. 策略配置：默认通用，家规自己定（可选）
 
@@ -206,7 +206,7 @@ R1 的判断依据默认只加载**通用策略**（`src/router/policies/generic
 & $DSH --profile $LLPROFILE --dump-config | Select-String -Pattern 'session-longlive' -Context 1,6
 ```
 
-有一条 `- id: session-longlive` / `name: dsh-longlive` 即已挂载。两条同 id → 回第 2 步改写法。
+有一条 `- id: session-longlive` / `name: @jjh32456/dsh-longlive` 即已挂载。两条同 id → 回第 2 步改写法。
 
 ### 3B. 再证明它真的激活了（不需要模型凭据，**这是关键一步**）
 
@@ -295,14 +295,14 @@ Get-FileHash -Algorithm SHA256 $OLD
 CLI（推荐，不需要会话权限）：
 
 ```powershell
-& $DSH plugin --profile $LLPROFILE remove dsh-longlive
+& $DSH plugin --profile $LLPROFILE remove @jjh32456/dsh-longlive
 & $DSH plugin --profile $LLPROFILE list --depth 0      # 应不再出现该包
 ```
 
 会话内等价写法（需要 danger-full-access 或逐次批准）：
 
 ```
-plugin_manager action=remove_bundle target="dsh-longlive"
+plugin_manager action=remove_bundle target="@jjh32456/dsh-longlive"
 ```
 
 确认**无残留**：
@@ -310,8 +310,8 @@ plugin_manager action=remove_bundle target="dsh-longlive"
 ```powershell
 $home = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE '.dsh' }
 $profileDir = Join-Path (Join-Path $home 'profiles') $LLPROFILE
-Test-Path (Join-Path $profileDir 'node_modules\dsh-longlive')   # 期望 False
-Select-String -Path (Join-Path $profileDir 'package.json') -Pattern 'dsh-longlive'  # 期望无输出
+Test-Path (Join-Path $profileDir 'node_modules\@jjh32456\dsh-longlive')   # 期望 False
+Select-String -Path (Join-Path $profileDir 'package.json') -Pattern '@jjh32456/dsh-longlive'  # 期望无输出
 ```
 
 卸载**不删除** `memoryRoot`（那是你的数据）；确认不再需要后手工删掉该目录即可。

@@ -4,4 +4,4 @@
 # manifest 里写死某台机器的路径会让别的机器装完直接起不来。
 - insert:
     - id: dsh-longlive-panel
-      name: dsh-longlive-panel
+      name: '@jjh32456/dsh-longlive-panel'

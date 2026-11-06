@@ -273,7 +273,7 @@ Copy-Item -LiteralPath $BAK -Destination $S -Force
 | 应用 exe | 不要假设应用装在固定目录 | `autoTruncate.appExe` 写本机实际路径；runner 也会用 `request.app.exe` |
 | node | 本机 `node` 可能不在 PATH | runner 依次找 `DSH_NODE`、应用运行时目录、PATH；手工调 CLI 时用应用自带 node |
 | sessions 根 | runner 默认 `$DSH_HOME/sessions`，否则 `%USERPROFILE%\.dsh\sessions` | 自定义过就用 `-SessionsRoot`；越界会 `SESSION_PATH_OUTSIDE_ROOT`（exit 2） |
-| 面板（dsh-longlive-panel@0.2.5） | 插件配了 `memoryRoot` ≠ 面板读同一个根 | 面板单独配 `memoryRoot`/`sessionsRoot`，或用 `DSH_LONGLIVE_MEMORY_ROOT` |
+| 面板（@jjh32456/dsh-longlive-panel@0.2.5） | 插件配了 `memoryRoot` ≠ 面板读同一个根 | 面板单独配 `memoryRoot`/`sessionsRoot`，或用 `DSH_LONGLIVE_MEMORY_ROOT` |
 | 路径分隔符 | YAML 双引号里的 `\` 是转义 | 用 `/` 或单引号 |
 
 跨机器复制记忆库时：先停两边应用，复制后跑 `memory_index`（dry-run）+ `memory_recall` 冒烟；
@@ -347,7 +347,7 @@ cd <插件目录>\scripts
   -RestartDelaySeconds 0
 ```
 
-它做两件事：注册一次性计划任务 `dsh-longlive-surgery`，然后立刻启动。
+它做两件事：注册一次性计划任务 `@jjh32456/dsh-longlive-surgery`，然后立刻启动。
 任务动作是：
 
 ```
@@ -356,7 +356,7 @@ powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy B
 ```
 
 `-WindowStyle Hidden` + 计划任务 = **没有任何用户可点的控制台**。
-看到 `TASK_STARTED dsh-longlive-surgery` 之后，注册窗口就可以关了；手术已经托管给
+看到 `TASK_STARTED @jjh32456/dsh-longlive-surgery` 之后，注册窗口就可以关了；手术已经托管给
 Task Scheduler，关掉注册窗口不会杀它（但也别在 30 秒阅读窗口内去关宿主，那会打断手术）。
 
 | 参数 | 默认 | 含义 |

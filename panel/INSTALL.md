@@ -1,9 +1,9 @@
-# 安装 · dsh-longlive-panel
+# 安装 · @jjh32456/dsh-longlive-panel
 
 > **本机现状（2026-11-06 打包时）：0.2.4 已装；本包 0.2.5 只改文案与页签显示顺序，尚未装机。**
 > `desktop` profile 的 `package.json` 里
-> `dsh-longlive-panel` 同时在 `bundles` 与 `dependencies`（`file:C:/dshops/install-1.6.3/packages/dsh-longlive-panel-0.2.4.tgz`），
-> `node_modules/dsh-longlive-panel` 是 0.2.4，面板路由已挂进宿主。
+> `@jjh32456/dsh-longlive-panel` 同时在 `bundles` 与 `dependencies`（`file:C:/dshops/install-1.6.3/packages/jjh32456-dsh-longlive-panel-0.2.4.tgz`），
+> `node_modules/@jjh32456/dsh-longlive-panel` 是 0.2.4，面板路由已挂进宿主。
 > 下面既写当前状态，也保留从零安装、验证、卸载的步骤；**改代码/配置后仍需重启宿主**。
 
 面板是**只读**的：八个 GET 路由（六个数据页签取数 + `/cards`、`/card` 的卡片正文），不写文件、
@@ -15,7 +15,7 @@
 
 | 项 | 值 |
 |---|---|
-| 包名 | `dsh-longlive-panel` |
+| 包名 | `@jjh32456/dsh-longlive-panel` |
 | 版本 | __DSH_PLUGIN_VERSION__ |
 | 类型 | Cordis 插件（宿主侧 `webServer` 路由 + Web 客户端 bundle） |
 | 入口 | `src/server.js`（宿主）、`src/client.js`（浏览器） |
@@ -56,16 +56,16 @@
 ## 2. 安装（本机 0.2.4 已装；下面是复核 / 换机 / 重装步骤）
 
 以 `desktop` profile 为例。本机 0.2.4 的安装来源是
-`C:\dshops\install-1.6.3\packages\dsh-longlive-panel-0.2.4.tgz`，装完已重启宿主、`GET /summary` 返回 `version:"0.2.4"`。
+`C:\dshops\install-1.6.3\packages\jjh32456-dsh-longlive-panel-0.2.4.tgz`，装完已重启宿主、`GET /summary` 返回 `version:"0.2.4"`。
 从零安装用同一套命令（把 tgz 换成你要装的版本）：
 
 ```powershell
 # 1) 装进 profile（dsh plugin 把参数原样转给 profile 目录里的 pnpm）
-dsh plugin --profile desktop add .\dsh-longlive-panel-__DSH_PLUGIN_VERSION__.tgz
+dsh plugin --profile desktop add .\@jjh32456/dsh-longlive-panel-__DSH_PLUGIN_VERSION__.tgz
 
 # 2) 把包名加进 profile 的 bundle 列表
 #    文件：C:\Users\Administrator\.dsh\profiles\desktop\package.json
-#    "dsh": { "profile": { "bundles": [ ... , "dsh-longlive-panel" ] } }
+#    "dsh": { "profile": { "bundles": [ ... , "@jjh32456/dsh-longlive-panel" ] } }
 ```
 
 `dsh plugin` 的语义（来自 `dsh plugin --help`）：把剩余参数**转发给 profile 目录里的 pnpm**，
@@ -116,7 +116,7 @@ curl.exe -s -o NUL -w "%{http_code}`n" "http://127.0.0.1:6705/api/longlive-panel
 
 ```yaml
 - id: dsh-longlive-panel
-  name: dsh-longlive-panel
+  name: '@jjh32456/dsh-longlive-panel'
   config:
     memoryRoot: "H:/dsh-memory"
     sessionsRoot: "C:/Users/Administrator/.dsh/sessions"
@@ -131,8 +131,8 @@ YAML 里用正斜杠（`H:/dsh-memory`）就不用转义反斜杠，Windows 上 
 ## 5. 卸载 / 回滚
 
 ```powershell
-# 1) 从 bundles 列表里删掉 "dsh-longlive-panel"
-dsh plugin --profile desktop remove dsh-longlive-panel
+# 1) 从 bundles 列表里删掉 "@jjh32456/dsh-longlive-panel"
+dsh plugin --profile desktop remove @jjh32456/dsh-longlive-panel
 # 2) 重启宿主
 ```
 

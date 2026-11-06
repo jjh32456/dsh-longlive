@@ -1,4 +1,4 @@
-# CONFIG.md — dsh-longlive（久视）配置手册
+# CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
 适用版本：**1.6.4**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
@@ -88,7 +88,7 @@ autoTruncate:
 
 ### 1.4a 热截断 `hotTruncate`（`compaction-hot-truncate` 行，默认接管压缩）
 
-热截断是包内 `cordis.patch.yml` 默认插入的 cut-only 压缩引擎（`dsh-longlive/compaction`）。
+热截断是包内 `cordis.patch.yml` 默认插入的 cut-only 压缩引擎（`@jjh32456/dsh-longlive/compaction`）。
 它的配置写在 **`compaction-hot-truncate` 条目**的 `config.hotTruncate` 下，不写在
 `session-longlive` 条目里；两个条目改完都要重启宿主。宿主的 stock `compaction-basic` 行被
 patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 仍可用。
@@ -96,7 +96,7 @@ patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 
 ```yaml
 - insert:
     - id: compaction-hot-truncate
-      name: 'dsh-longlive/compaction'
+      name: '@jjh32456/dsh-longlive/compaction'
       config:
         hotTruncate:
           mode: cut
@@ -200,7 +200,7 @@ d6:
 - **回退**：`d6.enabled: false`（或删除整个 `d6` 块）后重启；没有数据迁移。运行中选择、
   `restrict()` 或组装任一步抛错、或裁剪后工具集为空，也一律回到全量工具面，不阻断会话。
 
-### 1.5 面板（dsh-longlive-panel@0.2.5，独立可选插件）
+### 1.5 面板（@jjh32456/dsh-longlive-panel@0.2.5，独立可选插件）
 
 面板的配置**不继承**上面插件的 `memoryRoot`，它有自己的两个键（`src/server.js:2103-2109`）：
 
@@ -209,12 +209,12 @@ d6:
 | `memoryRoot` | string | `~/.dsh/longlive-memory` | 目录 | 是 | 面板只读这个目录。插件配了显式根（本机示例 `<memory-root>`）而面板没配 → **面板显示 0 卡**（它读的是默认空目录），不是记忆丢了 |
 | `sessionsRoot` | string | `~/.dsh/sessions` | 目录 | 是 | "截断记录"页读这里的 `<会话目录>/truncate.json`、`truncate-visible.json`（宿主可见对话截断账本）和 `backups.json`（并 stat 账本里记的备份文件）；两份截断账合并后按时间倒序列出。指错 → 该页空白 |
 
-面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。0.2.5 是配套本版的文案与 G1/G2/G4 修复版；本机 `desktop` profile 此前装的是 0.2.4（profile `package.json` 的 `dsh-longlive-panel` 依赖 + bundles 列表，`node_modules` 有 0.2.4），升级到 0.2.5 的装法/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
+面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。0.2.5 是配套本版的文案与 G1/G2/G4 修复版；本机 `desktop` profile 此前装的是 0.2.4（profile `package.json` 的 `@jjh32456/dsh-longlive-panel` 依赖 + bundles 列表，`node_modules` 有 0.2.4），升级到 0.2.5 的装法/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
 
 **1.6.0 新增：插件自带的设置页伴侣**（不是上面的面板包）。`package.json` 的 `./client` +
 `src/ui/*` 在宿主设置页的插件行注册 `plugins.row.config`，标题「久视 · 功能开关」，提供 7 个
 开关（D2 / D6 / 自动想起 / 共享大脑 / 后台面 / 每日维护 / Router）和只读 memoryRoot 展示；
-slot key 为 `dsh-longlive#session-longlive`（包名已改，row id 仍是 `session-longlive`）。
+slot key 为 `@jjh32456/dsh-longlive#session-longlive`（包名已改，row id 仍是 `session-longlive`）。
 保存走宿主 `configEditor.edit` 写回 profile patch，再由 Loader 常规重载；没有 `webServer`
 的 profile 不注册 `/api/longlive/flags`，插件照常加载。`workers.enabled` 不在 7 个面板开关里，
 需要直接改配置。

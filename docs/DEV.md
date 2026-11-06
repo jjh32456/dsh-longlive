@@ -1,4 +1,4 @@
-# dsh-longlive — session longevity for DSH
+# @jjh32456/dsh-longlive — session longevity for DSH
 
 中文名：**会话长寿**。给 DeepSeek Harness 的宿主插件。
 
@@ -11,7 +11,7 @@
 五步版见 [QUICKSTART.md](../QUICKSTART.md)。最短路径（tgz 已在手，CLI 不需要会话权限）：
 
 ```powershell
-& $DSH plugin --profile <profile> add "file:C:/path/to/dsh-longlive-1.6.4.tgz"
+& $DSH plugin --profile <profile> add "file:C:/path/to/jjh32456-dsh-longlive-1.6.4.tgz"
 & $DSH plugin --profile <profile> list --depth 0      # 应显示 @1.6.4
 ```
 
@@ -32,7 +32,7 @@ danger-full-access 或逐次批准。
 
 记忆根不配也能用（默认 `<DSH home>/longlive-memory`，自动创建）。
 
-本包**未发布到 npm registry**；请用上面的 tarball 安装，不要 `npm i dsh-longlive`。
+本包**未发布到 npm registry**；请用上面的 tarball 安装，不要 `npm i @jjh32456/dsh-longlive`。
 
 ---
 
@@ -119,7 +119,7 @@ R1 路由的判断依据拆成两层：**通用默认**（`src/router/policies/g
 # cordis.patch.yml（或宿主 profile 的插件 config）
 - insert:
     - id: session-longlive
-      name: 'dsh-longlive'
+      name: '@jjh32456/dsh-longlive'
       config:
         routerPolicyProfile: generic          # 默认；不写也是它
         # routerPolicyProfile: owner-rulings-2026-11-03   # 换某个主人的家规

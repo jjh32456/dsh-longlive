@@ -1,6 +1,7 @@
-# dsh-longlive（久视）
+# @jjh32456/dsh-longlive（久视）
 
-> 1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`，显示名「久视」（英文 Longlive）；
+> 1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；1.6.4 起发布名改为 scoped 包
+> `@jjh32456/dsh-longlive`（npm 包名），显示名仍是「久视」（英文 Longlive）；
 > 1.6.3 在 1.6.0 基线上新增**热截断**（cut-only 压缩引擎，见下文「版本与边界」），这一项是 1.5.0
 > 没有的能力；1.6.4 把热截断默认值收到 **300k 触发 / 保留 4 轮**，并修复 D6 重启后首轮冻结
 > （G3）与可移植性收口。升级步骤见 [docs/MIGRATION-1.6.0.md](docs/MIGRATION-1.6.0.md)。
@@ -80,13 +81,13 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:C:/path/dsh-longlive-1.6.4.tgz"
+& $DSH plugin --profile desktop add "file:C:/path/jjh32456-dsh-longlive-1.6.4.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
 
 # 3. 自检（只读，不改任何东西；设过 DSH_HOME 就把前半段换成 $env:DSH_HOME）
-& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
+& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
 
 上面的命令统一用 `& $DSH` 调用（`$DSH` 就是上面设的 `dsh.cmd` 路径）；若 `dsh` 已在 PATH，也可以直接写 `dsh`。
@@ -109,7 +110,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
   被裁掉的工具）。打开方式、预算与回退见 [docs/FEATURES.md](docs/FEATURES.md) 和
   [docs/CONFIG.md](docs/CONFIG.md)。
 - 默认记忆目录：`%USERPROFILE%\.dsh\longlive-memory`（首次启动自动创建）。
-- **没有自带界面**。另装可选的只读面板 `dsh-longlive-panel@0.2.5` 后，侧栏才会出现「潜望镜」，里面有七个页签：六层视图、截断记录、过滤器决策、影子记录、常驻 Router、本轮想起（另有「使用说明」）。面板是独立可选包，不装就没有这个侧栏。
+- **没有自带界面**。另装可选的只读面板 `@jjh32456/dsh-longlive-panel@0.2.5` 后，侧栏才会出现「潜望镜」，里面有七个页签：六层视图、截断记录、过滤器决策、影子记录、常驻 Router、本轮想起（另有「使用说明」）。面板是独立可选包，不装就没有这个侧栏。
 
 ## 第一次使用
 
@@ -128,7 +129,8 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ## 版本与边界
 
-- 本套文档对应 **1.6.4** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`）。
+- 本套文档对应 **1.6.4** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+  1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
   **1.6.3 起新增热截断**：一个不调 LLM 的 cut-only 压缩引擎，通过 bundle patch 关掉宿主 stock
   `compaction-basic` 行并插入 `compaction-hot-truncate`；只切「已完成、且早于保留窗口（默认 4 轮 /
   8000 token）」的整轮，切前先把原文归档到 `<memoryRoot>/.longlive/hot-truncate/`，再用一条覆盖率指针

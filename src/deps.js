@@ -22,7 +22,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(HERE, '..');
 
 /** The plugin itself — used to find profiles where longlive is enabled. */
-export const LONGLIVE_PLUGIN = 'dsh-longlive';
+export const LONGLIVE_PLUGIN = '@jjh32456/dsh-longlive';
 
 /** Used only when package.json cannot be read or has no optional peers. */
 export const KNOWN_OPTIONAL_PEERS = Object.freeze(['@kenz1117/dsh-engram']);

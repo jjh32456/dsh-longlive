@@ -227,7 +227,7 @@ function build(options) {
     fail(`package.json version is ${JSON.stringify(version)}, ` +
       `which does not match --expect-version ${JSON.stringify(expectedVersion)}`);
   }
-  if (pkg.name !== 'dsh-longlive') {
+  if (pkg.name !== '@jjh32456/dsh-longlive') {
     fail(`package name is ${JSON.stringify(pkg.name)}`);
   }
   const { files, excludedBackups } = selectFiles(pkg);
@@ -259,7 +259,7 @@ function build(options) {
   ];
   const tar = makeTar(entries);
   const gz = zlib.gzipSync(tar, { level: 9 });
-  const out = path.resolve(options.out ?? path.join(ROOT, 'dist', `dsh-longlive-${version}.tgz`));
+  const out = path.resolve(options.out ?? path.join(ROOT, 'dist', `jjh32456-dsh-longlive-${version}.tgz`));
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, gz);
   const digest = sha256(gz);
@@ -301,7 +301,7 @@ function verify(archivePath, options = {}) {
     throw new Error(
       `archive version ${JSON.stringify(version)} does not match --expect-version ${JSON.stringify(options.expectVersion)}`);
   }
-  if (info.name !== 'dsh-longlive') throw new Error(`build-info name ${JSON.stringify(info.name)}`);
+  if (info.name !== '@jjh32456/dsh-longlive') throw new Error(`build-info name ${JSON.stringify(info.name)}`);
   if (!Array.isArray(info.files) || info.files.length === 0) throw new Error('build-info has no file manifest');
 
   const paths = new Set();
@@ -389,3 +389,4 @@ try {
 } catch (error) {
   fail(error?.message ?? String(error));
 }
+

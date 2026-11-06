@@ -8,13 +8,13 @@
 
 大概率是正常的。这个插件**没有自带界面**，默认 `mode: "log"` 也只会在后台写一行评估日志，不会弹窗、不会剪东西。
 
-按顺序确认：`dsh plugin --profile desktop list --depth 0` 有 `dsh-longlive@1.6.4`；doctor 没有硬错误（退出码 0，或只有 engram 缺失导致的 1）；重启后新会话里能数到 22 个工具；聊到超过阈值后，`%USERPROFILE%\.dsh\longlive-memory\.longlive\logs\auto-truncate.log` 才出现评估行（默认阈值 300000，所以短时间内没有是正常的）。
+按顺序确认：`dsh plugin --profile desktop list --depth 0` 有 `@jjh32456/dsh-longlive@1.6.4`；doctor 没有硬错误（退出码 0，或只有 engram 缺失导致的 1）；重启后新会话里能数到 22 个工具；聊到超过阈值后，`%USERPROFILE%\.dsh\longlive-memory\.longlive\logs\auto-truncate.log` 才出现评估行（默认阈值 300000，所以短时间内没有是正常的）。
 
 如果这四样都没有，先看宿主启动 stderr 有没有 `1 entry did not activate`。
 
 ## 2. 侧栏没有「潜望镜」？
 
-「潜望镜」不是 longlive 本体自带的，它来自独立可选包 `dsh-longlive-panel@0.2.5`。不装那个包，就永远不会有这个侧栏——这不是故障。
+「潜望镜」不是 longlive 本体自带的，它来自独立可选包 `@jjh32456/dsh-longlive-panel@0.2.5`。不装那个包，就永远不会有这个侧栏——这不是故障。
 
 装了还没有，按顺序查：
 
@@ -83,10 +83,10 @@
 ## 9. 怎么卸载？卸载会删数据吗？
 
 ```powershell
-& $DSH plugin --profile desktop remove dsh-longlive
+& $DSH plugin --profile desktop remove @jjh32456/dsh-longlive
 ```
 
-然后重启宿主，`list` 里不再出现即成功。卸载**不会**删 `longlive-memory`、会话的 `.bak-YYYYMMDD`、`session.v4.jsonl.zstd.archive/` 和 `.longlive/` 状态文件；要清就自己确认后手动删。面板是独立可选包 `dsh-longlive-panel@0.2.5`，得单独 `remove dsh-longlive-panel`。
+然后重启宿主，`list` 里不再出现即成功。卸载**不会**删 `longlive-memory`、会话的 `.bak-YYYYMMDD`、`session.v4.jsonl.zstd.archive/` 和 `.longlive/` 状态文件；要清就自己确认后手动删。面板是独立可选包 `@jjh32456/dsh-longlive-panel@0.2.5`，得单独 `remove @jjh32456/dsh-longlive-panel`。
 
 ## 10. 怎么确认它真的生效了，而不是「装了个寂寞」？
 

@@ -29,7 +29,7 @@ import { VERSION } from '../src/version.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const PLUGIN = 'dsh-longlive';
+const PLUGIN = '@jjh32456/dsh-longlive';
 const AUDIT_FILE = 'longlive-doctor-audit.log';
 
 let manifest = {};

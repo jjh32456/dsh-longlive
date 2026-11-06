@@ -67,7 +67,7 @@ import { registerToolOutputTrim } from './tool-output.js';
 import { registerD6 } from './d6/runtime.js';
 import { registerUiRoutes } from './ui/routes.js';
 
-export const name = 'dsh-longlive';
+export const name = '@jjh32456/dsh-longlive';
 export const inject = ['tools'];
 /** The engines.dsh range this build was tested against (also in package.json). */
 export const HOST_RANGE = declaredHostRange();

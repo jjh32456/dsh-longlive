@@ -26,7 +26,7 @@
   disabled: true
 - insert:
     - id: compaction-hot-truncate
-      name: 'dsh-longlive/compaction'
+      name: '@jjh32456/dsh-longlive/compaction'
       config:
         hotTruncate:
           mode: cut
@@ -36,7 +36,7 @@
           minCutTokens: 0
 - insert:
     - id: session-longlive
-      name: 'dsh-longlive'
+      name: '@jjh32456/dsh-longlive'
       config:
         keepEvents: 20000
         recentWriteWindowMs: 60000

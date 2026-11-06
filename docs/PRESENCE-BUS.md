@@ -39,7 +39,7 @@
 
 ### 2.1 live 登记表
 
-`dsh-longlive` 在 `<memoryRoot>/.longlive/live/<sessionId>.json` 每个会话一行，字段：
+`@jjh32456/dsh-longlive` 在 `<memoryRoot>/.longlive/live/<sessionId>.json` 每个会话一行，字段：
 
 ```
 schemaVersion, sessionId, pid, host, startedAt, updatedAt, heartbeatAt,

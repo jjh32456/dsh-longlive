@@ -7,7 +7,7 @@
 的可选能力与默认值沿用 1.6.0。
 
 1.6.0 是**改名 + 普适化 + 设置页 + 安全默认**版：包名 `dsh-session-longlive` →
-`dsh-longlive`，显示名「久视」（英文 Longlive）。在这条改名基座上并入可移植记忆根、
+`@jjh32456/dsh-longlive`，显示名「久视」（英文 Longlive）。在这条改名基座上并入可移植记忆根、
 Config schema（1.6.0 为 80 节点，1.6.4 增加 `hotTruncate` 块后为 85）与设置页客户端，并把 `autoTruncate` / `routerRuntime` / `worker_*`
 三个默认值收到发布口径（见下文与 [CONFIG.md](CONFIG.md)）。迁移步骤见
 [MIGRATION-1.6.0.md](MIGRATION-1.6.0.md)。22 个工具的默认表面不变；D2/D6 仍默认关闭。
@@ -208,7 +208,7 @@ config:
   `superseded`；每会话每日 1 次、全局每日 5 次。
 - **唤醒**：`routerWakeEnabled` 默认 false；只对 idle/waiting 根会话，600s 冷却、每日
   20 次、`recentWakeIds` 去重，写 `wake-ready.jsonl` 交给外部消费。
-- **面板只读**：`dsh-longlive-panel@0.2.5` 只读 status/board，不做 approve/apply/propose。
+- **面板只读**：`@jjh32456/dsh-longlive-panel@0.2.5` 只读 status/board，不做 approve/apply/propose。
 
 Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/router-1100/` 与
 `test/router-l1-l2.contract.test.mjs`。
@@ -264,7 +264,7 @@ Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/rou
 ### `hotTruncate`（热截断，`compaction-hot-truncate` 行，默认接管压缩）
 
 热截断是 1.6.3 起包内 `cordis.patch.yml` 默认插入的 cut-only 压缩引擎
-（`dsh-longlive/compaction`）：不调 LLM，只把「已完成、且早于保留窗口」的整轮换成一条
+（`@jjh32456/dsh-longlive/compaction`）：不调 LLM，只把「已完成、且早于保留窗口」的整轮换成一条
 覆盖率指针，原文先归档。它的配置写在 `compaction-hot-truncate` 条目的
 `config.hotTruncate` 下，**不属于** `session-longlive` 行。
 

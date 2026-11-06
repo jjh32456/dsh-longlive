@@ -15,7 +15,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: 'dsh-longlive-panel',
+  id: '@jjh32456/dsh-longlive-panel',
   factory: (require) => {
     var module = { exports: {} }
     var exports = module.exports
@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
     const { useState, useEffect, useMemo, useCallback, useRef } = React
 
     const API = '/api/longlive-panel'
-    const PANEL_ID = 'dsh-longlive-panel'
+    const PANEL_ID = '@jjh32456/dsh-longlive-panel'
     const PANEL_LABEL = '潜望镜'
     const PANEL_ORDER = 42
     // 版本号不手写：构建脚本打包时会把版本占位符替换成 package.json 的 version。

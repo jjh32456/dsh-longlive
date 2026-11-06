@@ -2309,7 +2309,7 @@ function send(res, status, headers, body, headOnly) {
 // 宿主侧挂载
 // ---------------------------------------------------------------------------
 
-export const name = 'dsh-longlive-panel'
+export const name = '@jjh32456/dsh-longlive-panel'
 export const inject = ['webServer']
 
 export function apply(ctx, config = {}) {

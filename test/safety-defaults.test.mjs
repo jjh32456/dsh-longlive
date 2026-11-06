@@ -118,21 +118,23 @@ test('workers: fan-out tools are visible but unavailable until workers.enabled:t
   assert.match(status.message, /缺少必填参数 workerId/);
 });
 
-test('settings client: slot key is dsh-longlive#session-longlive (row id unchanged)', () => {
-  assert.equal(PKG.name, 'dsh-longlive');
-  assert.equal(FLAGS_PACKAGE, 'dsh-longlive');
+test('settings client: slot key is @jjh32456/dsh-longlive#session-longlive (row id unchanged)', () => {
+  assert.equal(PKG.name, '@jjh32456/dsh-longlive');
+  assert.equal(FLAGS_PACKAGE, '@jjh32456/dsh-longlive');
   assert.equal(FLAGS_ROW_ID, 'session-longlive');
-  assert.equal(FLAGS_SLOT_KEY, 'dsh-longlive#session-longlive');
+  assert.equal(FLAGS_SLOT_KEY, '@jjh32456/dsh-longlive#session-longlive');
   assert.equal(FLAGS_SLOT_KEY, `${PKG.name}#${FLAGS_ROW_ID}`);
 
   const bundle = read('lib/client.js');
-  assert.ok(bundle.includes('id: "dsh-longlive"'), 'client 模块 id 必须与包名一致');
-  assert.ok(bundle.includes('const SLOT_KEY = "dsh-longlive#session-longlive";'),
-    'client 注册的 slot key 必须是 dsh-longlive#session-longlive');
+  assert.ok(bundle.includes('id: "@jjh32456/dsh-longlive"'), 'client 模块 id 必须与包名一致');
+  assert.ok(bundle.includes('const SLOT_KEY = "@jjh32456/dsh-longlive#session-longlive";'),
+    'client 注册的 slot key 必须是 @jjh32456/dsh-longlive#session-longlive');
   assert.equal(bundle.includes('dsh-session-longlive#session-longlive'), false,
     'client 仍残留旧包名 slot key');
   assert.equal(bundle.includes('"dsh-session-longlive"'), false,
     'client 仍残留旧包名 id');
+  assert.equal(bundle.includes('id: "dsh-longlive"'), false,
+    'client 仍残留未 scoped 的模块 id');
 });
 
 test('Config schema: 85 nodes (1.6.4 adds hotTruncate), safety defaults visible, descriptions in zh+en', { skip: !CONFIG_SCHEMA_AVAILABLE }, () => {

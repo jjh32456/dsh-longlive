@@ -1,6 +1,6 @@
 # 错误码与下一步（ERRORS）
 
-dsh-longlive 的所有工具失败时都会返回 `{ ok: false, code, message }`（同步抛出的则是带 `code` 的 `Error`）。这张表按出错的位置分组：**先找你的 `code`，照最后一列做**。
+@jjh32456/dsh-longlive 的所有工具失败时都会返回 `{ ok: false, code, message }`（同步抛出的则是带 `code` 的 `Error`）。这张表按出错的位置分组：**先找你的 `code`，照最后一列做**。
 
 > 版本：1.5.0。码表与源码同步；新增码时必须同时改本文件（`test/portability.test.mjs` 会检查本文件随包发布）。
 
