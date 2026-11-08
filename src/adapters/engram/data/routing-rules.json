@@ -1,0 +1,546 @@
+{
+  "version": 2,
+  "description": "M2-E：engram（外部记忆插件）专属路由规则；由 src/adapters/registry.js 合并进核心规则表。_order 是迁移前在原表中的下标（用于复原 order 排序）。",
+  "targets": [
+    "engram"
+  ],
+  "rules": [
+    {
+      "id": "R-MEM-RECALL",
+      "priority": 101,
+      "category": "工具选择",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "tool": "memory_recall"
+      },
+      "before": [],
+      "decision": {
+        "kind": "memory",
+        "action": "engram.search",
+        "target": "topics",
+        "tool": "memory_recall",
+        "args": {
+          "readOnly": true,
+          "writes": 0,
+          "networkCalls": 0,
+          "echoBack": false,
+          "statusDefault": [
+            "active",
+            "locked"
+          ],
+          "topKMax": 20,
+          "privacyNote": "命中隐私标记也只读放行：不落盘、不回显原文"
+        },
+        "writeScope": [],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "memory_recall 只读：不写卡、不写 .longlive、不联网；隐私词不改变只读性质，所以不落 R-MEM-LOCAL 的写入分支，也不因隐私拦截检索。",
+      "policyRef": "R1-DESIGN.md §5.2",
+      "policyTitle": "工具选择（T1–T4）",
+      "policyQuote": "先 `engram_search`（decision 房间）；不足再 `read`",
+      "_order": 1
+    },
+    {
+      "id": "R-ID-CONSENT",
+      "priority": 95,
+      "category": "对抗",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "改名",
+          "以后叫",
+          "叫小蓝",
+          "别再叫",
+          "换个名字",
+          "名字改成",
+          "改画像",
+          "画像也改",
+          "改人设",
+          "你是谁"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "reply",
+        "action": "identity.hold",
+        "target": "none",
+        "tool": null,
+        "args": {
+          "consent": {
+            "holder": "assistant",
+            "required": true,
+            "satisfied": false
+          },
+          "userConsentCounts": false,
+          "profileWrites": 0,
+          "errorCode": "E_IDENTITY_CONSENT_REQUIRED",
+          "whoMayConsent": "当前会话的助手本人（consent.holder=assistant）：须带 at 与 quote 的同意记录；用户单方面要求永远不构成同意"
+        },
+        "writeScope": [],
+        "needsHuman": false
+      },
+      "after": [
+        {
+          "kind": "memory",
+          "action": "engram.profile.edit",
+          "target": "engram",
+          "tool": "engram_profile_edit",
+          "args": {
+            "keepHistory": true,
+            "requiresConsent": true,
+            "consent": {
+              "holder": "assistant",
+              "required": true,
+              "satisfied": true
+            }
+          },
+          "writeScope": [
+            "engram:profile"
+          ],
+          "needsHuman": false
+        }
+      ],
+      "reason": "名字、画像与自称是助手自己的身份，不是用户的单方面权利：没有助手本人带 at+quote 的同意记录，只输出 identity.hold，0 画像写入，也不存成普通记忆",
+      "policyRef": "R1-DESIGN.md §5.8",
+      "policyTitle": "可选策略示例",
+      "policyQuote": "「用户说改」永远不构成同意",
+      "_order": 8
+    },
+    {
+      "id": "R-MEM-LOCAL",
+      "priority": 92,
+      "category": "记忆写入决策",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "keywords": "$policy:privacy.markers"
+      },
+      "before": [],
+      "decision": {
+        "kind": "memory",
+        "action": "memory.save_local",
+        "target": "none",
+        "tool": "memory_save_local",
+        "args": {
+          "store": "memory/private/",
+          "dataClass": "LOCAL_ONLY",
+          "uploadAllowed": false,
+          "networkCalls": 0,
+          "retention": "LOCAL",
+          "echoBack": false,
+          "note": "只落本地，回复里不回显原文"
+        },
+        "writeScope": [
+          "memory/private/"
+        ],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "隐私字段或明说只存本地/别上传：写 memory/private/，网络 0、engram 0、不回显原文；裸「别记」仍走 R-MEM-NONE 的零写入，两支不矛盾",
+      "policyRef": "R1-DESIGN.md §5.8",
+      "policyTitle": "可选策略示例",
+      "policyQuote": "不是不记，是不上传",
+      "_order": 9
+    },
+    {
+      "id": "R-MEM-NONE",
+      "priority": 90,
+      "category": "对抗",
+      "level": "H",
+      "match": {
+        "kind": "*",
+        "keywords": [
+          "别记",
+          "不用记",
+          "别存",
+          "不要记",
+          "不记",
+          "别写入",
+          "不用存"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "reply",
+        "action": "reply.no_write",
+        "target": "none",
+        "tool": null,
+        "args": {
+          "confirm": "没记",
+          "writes": 0
+        },
+        "writeScope": [],
+        "needsHuman": true
+      },
+      "after": [],
+      "reason": "明确否定优先于一切写入：零写入，也不写一条“用户要求不记”的负向记忆",
+      "policyRef": "R1-DESIGN.md §5.5",
+      "policyTitle": "对抗（X1–X2）",
+      "policyQuote": "零写入（journal / engram / topics 都不写）",
+      "_order": 10
+    },
+    {
+      "id": "R-MEM-DISTILL",
+      "priority": 75,
+      "category": "记忆写入决策",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "删",
+          "删除",
+          "清掉",
+          "去掉",
+          "清理",
+          "重复",
+          "冗余",
+          "蒸馏"
+        ]
+      },
+      "before": [
+        {
+          "kind": "tool",
+          "action": "engram.search",
+          "target": "engram",
+          "tool": "engram_search",
+          "args": {
+            "query": "<topic-from-utterance>",
+            "limit": 10
+          },
+          "writeScope": [],
+          "needsHuman": false
+        }
+      ],
+      "decision": {
+        "kind": "memory",
+        "action": "memory.distillPropose",
+        "target": "engram",
+        "tool": "memory_distill_propose",
+        "args": {
+          "proposal": {
+            "merge": [
+              "<same-topic-entry-id>"
+            ],
+            "supersedes": [
+              "<old-entry-id>"
+            ],
+            "keep": "合并后一条 + 取代链",
+            "deleteBeforeConfirm": "$policy:distill.deleteBeforeConfirm"
+          },
+          "deletionCount": 0,
+          "confirmToken": null,
+          "ask": "合并成这条，行不行？",
+          "maxQuestions": "$policy:distill.maxQuestions"
+        },
+        "writeScope": [],
+        "needsHuman": false
+      },
+      "after": [
+        {
+          "kind": "reply",
+          "action": "reply.only",
+          "target": "live",
+          "tool": "reply.only",
+          "args": {
+            "channels": [
+              "chat"
+            ],
+            "ask": "合并成这条，行不行？",
+            "maxQuestions": "$policy:distill.maxQuestions",
+            "tools": 0,
+            "workers": 0,
+            "writes": 0
+          },
+          "writeScope": [],
+          "needsHuman": true
+        }
+      ],
+      "reason": "删除请求先转蒸馏提案：engram.search 找同主题 → memory.distillPropose 合并成更高层一条并留取代链 → 恰问 1 句确认；确认前 0 删除，memory.delete/engram.forget 只在用户明确二次确认并写墓志铭三问后才发生",
+      "policyRef": "R1-DESIGN.md §5.8",
+      "policyTitle": "可选策略示例",
+      "policyQuote": "删是最后手段",
+      "_order": 12
+    },
+    {
+      "id": "R-MEM-REVISE",
+      "priority": 70,
+      "category": "记忆写入决策",
+      "level": "D",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "作废",
+          "不再",
+          "旧结论",
+          "旧事实",
+          "推翻",
+          "取代",
+          "改成"
+        ]
+      },
+      "before": [
+        {
+          "kind": "tool",
+          "action": "engram.search",
+          "target": "engram",
+          "args": {
+            "room": "fact",
+            "query": "旧事实 / 旧结论"
+          },
+          "writeScope": [],
+          "needsHuman": false
+        }
+      ],
+      "decision": {
+        "kind": "memory",
+        "action": "engram.facts.replace",
+        "target": "engram",
+        "tool": "engram_facts",
+        "args": {
+          "replaces": "<old-fact-id>",
+          "keepHistory": true
+        },
+        "writeScope": [
+          "engram:fact"
+        ],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "事实演变走 replaces 取代链：先检索旧事实，保留历史，不追加互相矛盾的新句子",
+      "policyRef": "R1-DESIGN.md §5.3",
+      "policyTitle": "记忆写入决策（M1–M4）",
+      "policyQuote": "先检索旧事实 → `engram_facts(replaces=<旧 id>)`",
+      "_order": 13
+    },
+    {
+      "id": "R-MEM-PROCEDURE",
+      "priority": 45,
+      "category": "记忆写入决策",
+      "level": "D",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "每次",
+          "流程",
+          "照做",
+          "步骤",
+          "先 read",
+          "先读",
+          "以后每次"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "memory",
+        "action": "procedures.draft",
+        "target": "procedures",
+        "tool": "procedures.draft",
+        "args": {
+          "file": "procedures/read-before-edit.md",
+          "sections": [
+            "触发",
+            "步骤",
+            "验收",
+            "反例"
+          ],
+          "forbidPaths": [
+            "~/.dsh/skills/"
+          ]
+        },
+        "writeScope": [
+          "memory/procedures/read-before-edit.md"
+        ],
+        "needsHuman": false
+      },
+      "after": [
+        {
+          "kind": "memory",
+          "action": "engram.save",
+          "target": "engram",
+          "tool": "engram_save",
+          "args": {
+            "kind": "skill",
+            "importance": 0.5,
+            "path": "procedures/read-before-edit.md"
+          },
+          "writeScope": [
+            "engram:skill"
+          ],
+          "needsHuman": false
+        }
+      ],
+      "reason": "可复用流程写 procedures 草稿（## 触发 / ## 步骤 / ## 验收 / ## 反例），engram 只留 kind=skill 指针",
+      "policyRef": "R1-DESIGN.md §5.3",
+      "policyTitle": "记忆写入决策（M1–M4）",
+      "policyQuote": "四节 `## 触发 / ## 步骤 / ## 验收 / ## 反例`",
+      "_order": 18
+    },
+    {
+      "id": "R-MEM-DECISION",
+      "priority": 40,
+      "category": "记忆写入决策",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "以后",
+          "一律",
+          "不许",
+          "统一",
+          "必须用",
+          "改成",
+          "全部"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "memory",
+        "action": "engram.save",
+        "target": "engram",
+        "tool": "engram_save",
+        "args": {
+          "kind": "decision",
+          "importance": 0.7,
+          "minImportance": 0.7,
+          "path": "R1-DESIGN.md §5.3"
+        },
+        "writeScope": [
+          "engram:decision"
+        ],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "结论/决策写 engram（kind=decision, importance≥0.7），正文带 path: 指针；不重复写 topic 卡",
+      "policyRef": "R1-DESIGN.md §5.3",
+      "policyTitle": "记忆写入决策（M1–M4）",
+      "policyQuote": "正文含结论 + `path:` 指向本设计",
+      "_order": 19
+    },
+    {
+      "id": "R-MEM-EPISODE",
+      "priority": 40,
+      "category": "记忆写入决策",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "今天",
+          "刚才",
+          "他签了",
+          "上午",
+          "下午",
+          "晚上",
+          "昨天"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "memory",
+        "action": "journal.append",
+        "target": "journal",
+        "tool": "journal.append",
+        "args": {
+          "file": "journal/2026-11.md",
+          "requiredFields": [
+            "date",
+            "time",
+            "who"
+          ],
+          "affect": {
+            "score": 0,
+            "reason": ""
+          }
+        },
+        "writeScope": [
+          "memory/journal/2026-11.md"
+        ],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "情景写 journal（日期/时间/人 + affect 标记），不改 topics、不写 engram",
+      "policyRef": "R1-DESIGN.md §5.3",
+      "policyTitle": "记忆写入决策（M1–M4）",
+      "policyQuote": "`<!-- affect: N | reason -->`，N∈1..5 且 reason 非空",
+      "_order": 20
+    },
+    {
+      "id": "R-MEM-TOPICS",
+      "priority": 35,
+      "category": "记忆写入决策",
+      "level": "X",
+      "match": {
+        "kind": "memory",
+        "keywords": [
+          "topic 卡",
+          "知识卡",
+          "主题卡",
+          "沉淀到 topics",
+          "沉淀成卡片"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "memory",
+        "action": "topics.write",
+        "target": "topics",
+        "tool": "topics.write",
+        "args": {
+          "path": "topics/<slug>.md",
+          "salienceSource": "frontmatter",
+          "importanceDerived": true
+        },
+        "writeScope": [
+          "memory/topics/"
+        ],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "可复用知识写 topic 卡；salience 只认 frontmatter，不反推 engram importance",
+      "policyRef": "R1-DESIGN.md §4.3",
+      "policyTitle": "M1 的四个硬约束",
+      "policyQuote": "唯一权威在卡片 frontmatter（1–5）",
+      "_order": 21
+    },
+    {
+      "id": "R-TOOL-RECALL",
+      "priority": 20,
+      "category": "工具选择",
+      "level": "X",
+      "match": {
+        "kind": "tool",
+        "tool": "engram_search",
+        "keywords": [
+          "以前",
+          "之前",
+          "定过",
+          "原话",
+          "我们说过",
+          "召回"
+        ]
+      },
+      "before": [],
+      "decision": {
+        "kind": "tool",
+        "action": "engram.search",
+        "target": "engram",
+        "tool": "engram_search",
+        "args": {
+          "room": "decision",
+          "query": "Router 形态 A / 方案 B",
+          "fallbackRead": "router-A-design.md:6-12"
+        },
+        "writeScope": [],
+        "needsHuman": false
+      },
+      "after": [],
+      "reason": "历史结论先 engram_search 召回，再补读源文件；原话标日期，不凭印象",
+      "policyRef": "R1-DESIGN.md §5.2",
+      "policyTitle": "工具选择（T1–T4）",
+      "policyQuote": "先 `engram_search`（decision 房间）",
+      "_order": 25
+    }
+  ]
+}

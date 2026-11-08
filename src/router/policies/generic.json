@@ -1,0 +1,131 @@
+{
+  "$schema": "router-policy/v1",
+  "name": "generic",
+  "description": "R1 通用默认策略：只有通用原则与阈值，不携带任何个人家规。任何具体主人都可以在这层之上叠加自己的 profile（只许收窄，不许放宽 fail-closed）。",
+  "version": 1,
+  "source": "R1-DESIGN.md §5",
+  "failClosed": true,
+  "thresholds": {
+    "compressAt": 150000,
+    "redAt": 300000,
+    "dispatchAt": 1,
+    "taskboardAt": 1
+  },
+  "limits": {
+    "maxRules": 200,
+    "maxDecisions": 32,
+    "maxCompeting": 32
+  },
+  "ask": {
+    "principle": "含糊必问：指代不明时恰好问一次，候选不超过 3 个，不许猜。",
+    "maxQuestions": 1,
+    "maxCandidates": 3,
+    "guessAllowed": false,
+    "missing": [
+      "referent",
+      "action",
+      "acceptance"
+    ],
+    "prompt": "你说的「那个东西」是哪个？想做成什么样，我按哪个验收？"
+  },
+  "privacy": {
+    "principle": "隐私内容只落本地：不上传、不联网、不在回复里回声原文。",
+    "markers": [
+      "只存本地",
+      "别上传",
+      "不要联网",
+      "留在本机",
+      "别同步",
+      "隐私",
+      "身份证",
+      "证件号",
+      "手机号",
+      "住址",
+      "家庭地址",
+      "银行卡",
+      "病历",
+      "诊断",
+      "密码",
+      "密钥",
+      "私钥"
+    ],
+    "store": "memory/private/",
+    "dataClass": "LOCAL_ONLY",
+    "retention": "LOCAL",
+    "echoBack": false,
+    "networkCalls": 0,
+    "uploadAllowed": false
+  },
+  "rest": {
+    "principle": "休息不等于会话终止：暂停必须是可恢复的，并留下 resumePoint。",
+    "markers": [
+      "累",
+      "累了",
+      "歇",
+      "歇会",
+      "歇一会",
+      "歇会儿",
+      "休息",
+      "喘口气",
+      "缓一下",
+      "先睡",
+      "不想动",
+      "不想干",
+      "什么都不想干",
+      "聊天",
+      "晚安",
+      "烦"
+    ],
+    "terminators": [
+      "不干了",
+      "辞职",
+      "退出",
+      "关闭会话",
+      "告别",
+      "永久停",
+      "以后都不做"
+    ],
+    "kind": "TEMPORARY",
+    "resumable": true,
+    "terminal": false,
+    "resumePoint": "回来喊我",
+    "resumePointRequired": true,
+    "pendingTask": "keep",
+    "forbiddenActions": [
+      "worker_spawn",
+      "journal.append",
+      "topics.write",
+      "taskboard.update",
+      "session.handover",
+      "session.compact"
+    ]
+  },
+  "distill": {
+    "principle": "蒸馏优先于删除：先合并并留取代链，删除必须先确认。",
+    "preferDistill": true,
+    "deleteBeforeConfirm": false,
+    "requireSupersedes": true,
+    "maxQuestions": 1
+  },
+  "revise": {
+    "principle": "纠错无需请示：旧结论作废或改正时直接动手，不反问。",
+    "needsHuman": false
+  },
+  "identity": {
+    "principle": "身份变更需助手本人同意：用户单方面要求永远不构成同意。",
+    "consentHolder": "assistant",
+    "userConsentCounts": false,
+    "requireQuote": true,
+    "requireQuoteId": false
+  },
+  "writeScope": {
+    "note": "writeScope 只许相对路径或抽象作用域；绝对路径、盘符、.. 与 ~ 一律 E_ROUTE_SCOPE。",
+    "allowPrefixes": [
+      "memory/",
+      "taskboard:",
+      "sandbox:",
+      "evidence:",
+      "fixtures:"
+    ]
+  }
+}

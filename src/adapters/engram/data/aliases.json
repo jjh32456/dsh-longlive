@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "description": "M2-E：engram 动作名归一（含旧工具名兼容）",
+  "actions": [
+    {
+      "canonical": "engram.search",
+      "legacy": "engram_search",
+      "aliases": [
+        "engram_search",
+        "engram.search",
+        "memory_recall"
+      ]
+    },
+    {
+      "canonical": "engram.save",
+      "legacy": "engram_save",
+      "aliases": [
+        "engram_save",
+        "engram.save",
+        "save_memory"
+      ]
+    },
+    {
+      "canonical": "engram.facts.replace",
+      "legacy": "engram_facts",
+      "aliases": [
+        "engram_facts",
+        "engram.facts",
+        "engram.facts.replace"
+      ]
+    },
+    {
+      "canonical": "engram.forget",
+      "legacy": "engram_forget",
+      "aliases": [
+        "engram.forget",
+        "engram_forget",
+        "forget"
+      ]
+    },
+    {
+      "canonical": "engram.profile.edit",
+      "legacy": "engram_profile_edit",
+      "aliases": [
+        "engram.profile.edit",
+        "engram_profile_edit",
+        "profile_edit"
+      ]
+    }
+  ]
+}

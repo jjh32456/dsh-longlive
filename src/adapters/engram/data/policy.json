@@ -1,0 +1,8 @@
+{
+  "forbiddenActions": [
+    "engram.save"
+  ],
+  "allowPrefixes": [
+    "engram:"
+  ]
+}

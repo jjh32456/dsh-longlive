@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Longlive",
+    "description": "Keep long-running sessions alive: health check, verified backup, and safe log truncation that never changes the visible conversation."
+  }
+}
