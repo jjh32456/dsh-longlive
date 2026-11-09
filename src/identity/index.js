@@ -4,7 +4,7 @@
 //   1. agent/pre-step（step === 1）把「开机卡」插到第一条真实 user 消息之后；
 //   2. session/event 的 turn/end 与 session/disposed 把交接卡草稿写进 outbox。
 //
-// 顺序契约（评审第三轮 mustFix #2）：本插件用 `{ prepend:true }` 注册，是 Cordis
+// 顺序契约（复核第三轮 mustFix #2）：本插件用 `{ prepend:true }` 注册，是 Cordis
 // waterfall 的最外层。开机卡必须在 `await next()` **之前** 原地插入
 // `payload.messages`，因为宿主 inner 闭包引用的是同一个 claimed 数组；等 next()
 // 回来再 append 会得到 `[user, runtime, auto, boot]`（auto 在内层看不到 boot）。
@@ -12,7 +12,7 @@
 // tooltip（client.js:8373-8383），boot 在首位会让第 1 轮显示【开机卡】。
 // 目标顺序：`[user, boot, runtime, auto]`。
 //
-// source.kind（评审第四轮 M1）：用宿主的隐藏注入 kind
+// source.kind（复核第四轮 M1）：用宿主的隐藏注入 kind
 // `{ kind:'session-reference', form:'recall', version:1, references:[] }`。
 // 宿主把它投影成 context 节点，isVisibleChatNode=false：聊天里不再出现
 // 【开机卡】用户气泡，但 deriveMessages 仍含正文。可见性由潜望镜面板承担

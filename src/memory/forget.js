@@ -211,7 +211,38 @@ function protectedHit(root, rel) {
  * is backed up first, its tombstone line is rewritten before its move, then it
  * is moved (never deleted).
  */
+/**
+ * Read-only forget visibility: real runs and recorded dry-runs, plus whether the
+ * on-disk scaffold a confirmed run needs exists. Never writes.
+ */
+export function forgetStatus(args = {}, config = {}) {
+  const root = memoryRootFromConfig(config);
+  let state = null;
+  try { state = readState(root); } catch { state = null; }
+  const runs = Array.isArray(state?.forgetRuns) ? state.forgetRuns : [];
+  const scaffold = forgetScaffold(root);
+  return {
+    ok: true,
+    status: 'forget-status',
+    readOnly: true,
+    root,
+    enabled: true,
+    executeRequires: `confirm:"${CONFIRM_WORD}" + host auditKey`,
+    runs: runs.slice(-20),
+    runCount: runs.length,
+    lastRun: runs.length > 0 ? runs[runs.length - 1] : null,
+    epochsExists: fs.existsSync(epochsDir(root)),
+    archiveExists: fs.existsSync(archiveDir(root)),
+    backupsExists: fs.existsSync(backupsDir(root)),
+    scaffold,
+    message: runs.length > 0
+      ? `遗忘路径已启用；已记录 ${runs.length} 次（真实/ dry-run），最近一次 ${runs[runs.length - 1]?.at ?? 'unknown'}`
+      : '遗忘路径已启用但尚未运行；dry-run 有 state 时会记录，执行需 confirm:"FORGET" + host key',
+  };
+}
+
 export function memoryForget(args = {}, config = {}) {
+  if (args.status === true) return forgetStatus({}, config);
   const root = memoryRootFromConfig(config);
   const now = config.now instanceof Date ? config.now : new Date();
   const today = config.today ?? dayString(now);
@@ -280,6 +311,28 @@ export function memoryForget(args = {}, config = {}) {
       const card = cards.find((entry) => entry.rel === proposal.path);
       return planProposal(card, proposal, root, now);
     });
+    // Visibility without breaking the "dry-run writes nothing" contract: when
+    // the memory root already has a state file, record the dry-run there; a
+    // fresh fixture root stays byte-identical (legacy tests).
+    let dryRunRecord = null;
+    try {
+      if (fs.existsSync(path.join(root, '.longlive', 'memory-state.json'))) {
+        const state = readState(root);
+        const forgetRuns = [...state.forgetRuns, {
+          at: now.toISOString(),
+          dryRun: true,
+          proposed: planned.length,
+          moved: 0,
+        }].slice(-50);
+        dryRunRecord = updateState(root, { forgetRuns }, { now });
+        appendAudit(root, {
+          action: 'memory_forget_dry_run',
+          object: root,
+          result: `proposed=${planned.length} moved=0`,
+          now,
+        });
+      }
+    } catch { dryRunRecord = null; }
     return {
       ok: true,
       status: 'dry-run',
@@ -293,10 +346,12 @@ export function memoryForget(args = {}, config = {}) {
       undated,
       rules: DECAY_RULES,
       scaffold,
-      audit: { file: auditRel, appended: 0, willAppend: 1 },
+      dryRunRecorded: dryRunRecord !== null,
+      audit: { file: auditRel, appended: dryRunRecord !== null ? 2 : 0, willAppend: 1 },
       message:
         `dry-run：${cards.length} 张卡 → ${proposals.length} 个遗忘提案（立碑 ${proposals.filter((item) => item.kind === 'tombstone').length}，降级 ${proposals.filter((item) => item.kind === 'epochs').length}），` +
-        `${immune.length} 张核心记忆免疫；脚手架${scaffold.missing.length ? `缺 ${scaffold.missing.join('/')}` : '齐全'}，未写任何文件（不建目录、不写 audit），执行需 confirm:"${CONFIRM_WORD}"`,
+        `${immune.length} 张核心记忆免疫；脚手架${scaffold.missing.length ? `缺 ${scaffold.missing.join('/')}` : '齐全'}，` +
+        `${dryRunRecord !== null ? '已记录本次 dry-run 到 memory-state/audit' : '未写任何文件（root 尚无 state 文件；显式执行或已有 state 时记录）'}；执行需 confirm:"${CONFIRM_WORD}"`,
     };
   }
 

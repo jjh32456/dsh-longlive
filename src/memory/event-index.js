@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { decompressFrame, deriveMessagesDigest, parseSession, splitFrames, stableStringify } from '../codec.js';
+import { appendJsonLine } from '../util/append-store.js';
 import { extractTerms, termTextOf, aliasesOf, buildFtsCandidates } from './fts-query.js';
 import { makeSessionTurnAnchor, turnDigest } from './anchors.js';
 
@@ -30,13 +31,18 @@ function sqlite() {
   return sqliteModule;
 }
 
+// S8: import 放在 SQLite loader 之后（ESM 合法），与同文件顶部 S1 的
+// append-store import 错开，降低两个补丁在同一文件同一区域的文本冲突。
+import { extractTopicPhrases } from './topic-phrases.js';
+
 export const INDEX_DIRNAME = 'index';
 export const EVENTS_DB = 'events.db';
 export const EVENTS_AUDIT = 'events.audit.jsonl';
 export const FRAMES_DIR = 'frames';
 export const BUILD_STATE = 'build-state.json';
 export const EVENT_SCHEMA = 'events/v1';
-export const INDEX_SCHEMA_VERSION = 1;
+// S8: 2 = 新增 topic_phrases_json（向后兼容：老库自动 ALTER，老记录读成 []）。
+export const INDEX_SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
@@ -53,6 +59,7 @@ CREATE TABLE IF NOT EXISTS events (
   summary TEXT,
   topics_json TEXT,
   terms_json TEXT,
+  topic_phrases_json TEXT,
   counts_json TEXT,
   anchors_json TEXT,
   digest TEXT NOT NULL,
@@ -121,6 +128,7 @@ function rawTextFor(record) {
     `[${record.kind}] ${record.summary}`,
     Array.isArray(record.terms) ? record.terms.join(' ') : '',
     Array.isArray(record.topics) ? record.topics.join(' ') : '',
+    Array.isArray(record.topicPhrases) ? record.topicPhrases.join(' ') : '',
     record.project ?? '',
   ];
   return parts.filter((part) => typeof part === 'string' && part !== '').join('\n').slice(0, 20000);
@@ -141,6 +149,7 @@ function parseRow(row) {
     summary: row.summary,
     topics: safeJson(row.topics_json, []),
     terms: safeJson(row.terms_json, []),
+    topicPhrases: safeJson(row.topic_phrases_json, []),
     counts: safeJson(row.counts_json, {}),
     anchors: safeJson(row.anchors_json, []),
     digest: row.digest,
@@ -151,6 +160,7 @@ function parseRow(row) {
 }
 
 function safeJson(text, fallback) {
+  if (text === null || text === undefined || text === '') return fallback;
   try {
     return JSON.parse(text);
   } catch {
@@ -178,6 +188,62 @@ function validateRecord(record) {
  * @param {() => Date} [options.now]
  * @param {string} [options.dbPath] override for tests
  */
+/**
+ * Read-only event search used by memory_recall/status surfaces. Opens the DB
+ * with `readOnly: true` when supported; never creates the index or changes WAL.
+ */
+export function searchEventsReadOnly({ memoryRoot = '', query = '', limit = 5 } = {}) {
+  const root = path.resolve(String(memoryRoot ?? ''));
+  if (root === '') return { ok: false, code: 'E_MEMORY_ROOT', rows: [] };
+  const paths = indexPaths(root);
+  if (!fs.existsSync(paths.db)) return { ok: false, code: 'E_EVENTS_INDEX_MISSING', rows: [] };
+  const q = String(query ?? '').trim().toLowerCase();
+  if (q === '') return { ok: true, rows: [], strategy: 'empty-query' };
+  let db = null;
+  try {
+    const { DatabaseSync } = sqlite();
+    try {
+      db = new DatabaseSync(paths.db, { readOnly: true });
+    } catch {
+      // Older Node builds may not accept readOnly; a query-only handle is still
+      // safe because this function never calls write statements.
+      db = new DatabaseSync(paths.db);
+    }
+    const rows = db.prepare('SELECT id, session_id, turn, kind, summary, terms_json, anchors_json, digest FROM events').all();
+    const terms = q.split(/\s+/u).filter(Boolean);
+    const scored = [];
+    for (const row of rows) {
+      let termsList = [];
+      try { termsList = JSON.parse(row.terms_json ?? '[]'); } catch { /* corrupt row */ }
+      const haystack = `${row.summary ?? ''} ${Array.isArray(termsList) ? termsList.join(' ') : ''}`.toLowerCase();
+      let score = 0;
+      for (const term of terms) {
+        if (haystack.includes(term)) score += 1;
+        if (String(row.summary ?? '').toLowerCase().includes(term)) score += 2;
+      }
+      if (score <= 0) continue;
+      let anchors = [];
+      try { anchors = JSON.parse(row.anchors_json ?? '[]'); } catch { /* corrupt */ }
+      scored.push({
+        id: row.id,
+        sessionId: row.session_id,
+        turn: row.turn,
+        kind: row.kind,
+        summary: row.summary ?? '',
+        terms: Array.isArray(termsList) ? termsList : [],
+        anchor: Array.isArray(anchors) ? anchors[0] ?? null : null,
+        score,
+      });
+    }
+    scored.sort((a, b) => b.score - a.score || String(a.id).localeCompare(String(b.id)));
+    return { ok: true, rows: scored.slice(0, Math.max(1, Math.min(20, Number(limit) || 5))), strategy: 'readonly-scan' };
+  } catch (error) {
+    return { ok: false, code: error?.code ?? 'E_EVENTS_READ', message: String(error?.message ?? error), rows: [] };
+  } finally {
+    try { db?.close(); } catch { /* best effort */ }
+  }
+}
+
 export function openEventIndex(options = {}) {
   const memoryRoot = path.resolve(String(options.memoryRoot ?? ''));
   if (memoryRoot === '') throw new IndexError('E_MEMORY_ROOT', 'memoryRoot required');
@@ -186,11 +252,117 @@ export function openEventIndex(options = {}) {
   fs.mkdirSync(paths.dir, { recursive: true });
   fs.mkdirSync(paths.framesDir, { recursive: true });
   const dbPath = options.dbPath ? path.resolve(options.dbPath) : paths.db;
+  const dbExisted = fs.existsSync(dbPath);
   const { DatabaseSync } = sqlite();
-  const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA busy_timeout = 5000');
-  db.exec(SCHEMA);
+  const migrationDiag = (row) => {
+    try {
+      const dir = path.join(memoryRoot, '.longlive', 'diagnostics');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(path.join(dir, 'event-index-migration.jsonl'),
+        `${JSON.stringify({ schema: 'event-index-migration/v1', at: nowIso(now), ...row })}\n`, 'utf8');
+    } catch { /* diagnostics must never mask the real error */ }
+  };
+  let db;
+  try {
+    db = new DatabaseSync(dbPath);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA busy_timeout = 5000');
+  } catch (error) {
+    migrationDiag({ event: 'open-failed', dbPath, code: error?.code ?? null, message: String(error?.message ?? error) });
+    throw new IndexError('E_INDEX_UNAVAILABLE', `event index open failed: ${error?.message ?? error}`, {
+      dbPath, cause: error?.code ?? String(error),
+    });
+  }
+
+  let needsMigration = false;
+  // A brand-new/empty DB will get the current SCHEMA (which already has the
+  // column), so only an existing events table can be genuinely missing it.
+  let hasTopicPhrases = true;
+  try {
+    const eventsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='events'").get();
+    if (eventsTable) {
+      const columns = db.prepare('PRAGMA table_info(events)').all();
+      hasTopicPhrases = columns.some((column) => column.name === 'topic_phrases_json');
+      const userVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version ?? 0);
+      const hasMeta = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='meta'").get();
+      const metaSchema = hasMeta ? (db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()?.v ?? null) : null;
+      needsMigration = dbExisted && (!hasTopicPhrases || userVersion < INDEX_SCHEMA_VERSION
+        || metaSchema === `${EVENT_SCHEMA}/1` || metaSchema === null);
+    }
+  } catch (error) {
+    db.close();
+    migrationDiag({ event: 'inspect-failed', dbPath, code: error?.code ?? null, message: String(error?.message ?? error) });
+    throw new IndexError('E_INDEX_UNAVAILABLE', `event index schema inspection failed: ${error?.message ?? error}`, {
+      dbPath, cause: error?.code ?? String(error),
+    });
+  }
+
+  let backupPath = null;
+  const backupSuffixes = ['-wal', '-shm'];
+  const backupSidecars = [];
+  let restoreBackup = null;
+  if (needsMigration) {
+    backupPath = `${dbPath}.bak-${nowIso(now).replace(/[:.]/g, '-')}`;
+    try {
+      // Checkpoint first so the main DB is a complete snapshot; sidecars are
+      // copied too when SQLite keeps them, and restored as a set on failure.
+      try { db.exec('PRAGMA wal_checkpoint(FULL)'); } catch { /* best effort */ }
+      fs.copyFileSync(dbPath, backupPath);
+      for (const suffix of backupSuffixes) {
+        const from = `${dbPath}${suffix}`;
+        if (!fs.existsSync(from)) continue;
+        const to = `${backupPath}${suffix}`;
+        fs.copyFileSync(from, to);
+        backupSidecars.push(to);
+      }
+      migrationDiag({ event: 'backup-created', dbPath, backupPath, sidecars: backupSidecars });
+      restoreBackup = () => {
+        try { db.close(); } catch { /* already closed */ }
+        fs.copyFileSync(backupPath, dbPath);
+        for (const suffix of backupSuffixes) {
+          const from = `${backupPath}${suffix}`;
+          const to = `${dbPath}${suffix}`;
+          if (fs.existsSync(from)) fs.copyFileSync(from, to);
+          else if (fs.existsSync(to)) fs.rmSync(to, { force: true });
+        }
+      };
+    } catch (error) {
+      try { db.close(); } catch { /* ignore */ }
+      migrationDiag({ event: 'backup-failed', dbPath, backupPath, code: error?.code ?? null, message: String(error?.message ?? error) });
+      throw new IndexError('E_INDEX_MIGRATION_BACKUP', `event index migration backup failed: ${error?.message ?? error}`, {
+        dbPath, backupPath, cause: error?.code ?? String(error),
+      });
+    }
+  }
+
+  try {
+    db.exec(SCHEMA);
+    if (!hasTopicPhrases) db.exec('ALTER TABLE events ADD COLUMN topic_phrases_json TEXT');
+    db.exec(`PRAGMA user_version = ${INDEX_SCHEMA_VERSION}`);
+    db.prepare("INSERT INTO meta(k, v) VALUES('schema', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+      .run(`${EVENT_SCHEMA}/${INDEX_SCHEMA_VERSION}`);
+    db.prepare("INSERT INTO meta(k, v) VALUES('schema_version', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+      .run(String(INDEX_SCHEMA_VERSION));
+    if (needsMigration) {
+      db.prepare("INSERT INTO meta(k, v) VALUES('last_migration_backup', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+        .run(String(backupPath ?? ''));
+      db.prepare("INSERT INTO meta(k, v) VALUES('last_migration_at', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+        .run(nowIso(now));
+      migrationDiag({ event: 'migration-applied', dbPath, backupPath, version: INDEX_SCHEMA_VERSION });
+    }
+  } catch (error) {
+    if (restoreBackup) {
+      try { restoreBackup(); } catch (restoreError) {
+        migrationDiag({ event: 'restore-failed', dbPath, backupPath, code: restoreError?.code ?? null, message: String(restoreError?.message ?? restoreError) });
+      }
+    } else {
+      try { db.close(); } catch { /* ignore */ }
+    }
+    migrationDiag({ event: 'migration-failed', dbPath, backupPath, code: error?.code ?? null, message: String(error?.message ?? error) });
+    throw new IndexError('E_INDEX_MIGRATION', `event index migration failed: ${error?.message ?? error}`, {
+      dbPath, backupPath, restored: Boolean(restoreBackup), cause: error?.code ?? String(error),
+    });
+  }
   let closed = false;
 
   function getMeta(key) {
@@ -216,11 +388,16 @@ export function openEventIndex(options = {}) {
       source: record.source ?? 'rebuild',
       action,
     };
-    try {
-      fs.appendFileSync(paths.audit, `${JSON.stringify(line)}\n`, 'utf8');
-    } catch {
-      /* audit layer is derived; the DB row is the query source */
-    }
+    // S1: append 失败不再静默 — append-store 统一加锁/fsync/坏行隔离，并记
+    // logger.warn + 计数（write-health）。本审计层仍是派生数据：失败不阻断 upsert。
+    return appendJsonLine({
+      file: paths.audit,
+      row: line,
+      label: 'events.audit',
+      healthRoot: paths.root,
+      now,
+      quarantineDir: path.join(paths.root, '.longlive', 'quarantine'),
+    });
   }
 
   function upsertEvent(record, options2 = {}) {
@@ -238,7 +415,7 @@ export function openEventIndex(options = {}) {
     const builtAt = Number.isInteger(record.builtAt) ? record.builtAt : Date.parse(nowIso(now));
     const source = record.source ?? options2.source ?? 'rebuild';
     const rawText = rawTextFor(record);
-    const termText = termTextOf([record.summary, ...(record.topics ?? []), ...(record.terms ?? [])].join('\n')).slice(0, 12000);
+    const termText = termTextOf([record.summary, ...(record.topics ?? []), ...(record.terms ?? []), ...(record.topicPhrases ?? [])].join('\n')).slice(0, 12000);
     const aliases = [...new Set([...(aliasesOf(record.summary ?? '')), ...(record.aliases ?? [])])].join(' ').slice(0, 4000);
     const anchors = record.anchors ?? [];
     db.exec('BEGIN IMMEDIATE');
@@ -246,14 +423,15 @@ export function openEventIndex(options = {}) {
       db.prepare(`
         INSERT INTO events
           (id, session_id, turn, seq_start, seq_end, time_start, time_end, project, kind,
-           summary, topics_json, terms_json, counts_json, anchors_json, digest, built_at, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           summary, topics_json, terms_json, topic_phrases_json, counts_json, anchors_json, digest, built_at, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           session_id = excluded.session_id, turn = excluded.turn,
           seq_start = excluded.seq_start, seq_end = excluded.seq_end,
           time_start = excluded.time_start, time_end = excluded.time_end,
           project = excluded.project, kind = excluded.kind, summary = excluded.summary,
           topics_json = excluded.topics_json, terms_json = excluded.terms_json,
+          topic_phrases_json = excluded.topic_phrases_json,
           counts_json = excluded.counts_json, anchors_json = excluded.anchors_json,
           digest = excluded.digest, built_at = excluded.built_at, source = excluded.source
       `).run(
@@ -264,6 +442,7 @@ export function openEventIndex(options = {}) {
         record.summary ?? null,
         JSON.stringify(record.topics ?? []),
         JSON.stringify(record.terms ?? []),
+        JSON.stringify(record.topicPhrases ?? []),
         JSON.stringify(record.counts ?? {}),
         JSON.stringify(anchors),
         record.digest, builtAt, source,
@@ -403,6 +582,32 @@ export function openEventIndex(options = {}) {
   return { memoryRoot, paths, dbPath, upsertEvent, deleteSession, search, listEvents, count, getEvent, stats, getMeta, setMeta, close };
 }
 
+/** One-line summary: user first message kept whole (240 chars) + assistant tail 160. */
+function summaryOf(userTexts, assistantTexts, topicPhrases = []) {
+  const head = userTexts[0] ?? assistantTexts[0] ?? '';
+  const tail = assistantTexts[assistantTexts.length - 1] ?? '';
+  const parts = [
+    String(head).replace(/\s+/g, ' ').trim().slice(0, 240),
+    tail === '' ? '' : `→ ${String(tail).replace(/\s+/g, ' ').trim().slice(0, 160)}`,
+  ].filter((part) => part !== '');
+  const summary = parts.join(' ').slice(0, 480);
+  return summary;
+}
+
+/** Deduped topicPhrases: user-marked phrases first, then turn-wide phrases. */
+function topicPhrasesOf(userTexts, assistantTexts) {
+  const userPhrases = extractTopicPhrases(userTexts, { limit: 8 });
+  const allPhrases = extractTopicPhrases([...userTexts, ...assistantTexts], { limit: 12 });
+  const out = [];
+  const seen = new Set();
+  for (const phrase of [...userPhrases, ...allPhrases]) {
+    if (seen.has(phrase)) continue;
+    seen.add(phrase);
+    out.push(phrase);
+  }
+  return out.slice(0, 12);
+}
+
 /** Extract per-turn EventRecords from a parsed session. */
 export function extractTurns(header, events, frames = [], texts = []) {
   const sessionId = typeof header?.id === 'string' && header.id !== ''
@@ -451,11 +656,12 @@ export function extractTurns(header, events, frames = [], texts = []) {
     const corpus = [...userTexts, ...assistantTexts].filter((text) => text !== '').join('\n');
     const counts = { userMsgs: userTexts.length, assistantMsgs: assistantTexts.length, toolCalls };
     const kind = classifyKind(corpus, counts);
-    const head = userTexts[0] ?? assistantTexts[0] ?? '';
-    const tail = assistantTexts[assistantTexts.length - 1] ?? '';
-    const summary = [head.slice(0, 160), tail === '' ? '' : `→ ${tail.slice(0, 160)}`].filter(Boolean).join(' ').slice(0, 400);
-    const terms = extractTerms(corpus, [sessionId]);
-    const topics = [...new Set(terms.filter((term) => /[\u3400-\u4dbf\u4e00-\u9fff]/.test(term)))].slice(0, 5);
+    // S8: 主题短语先从用户消息抽（引号/书名号/内容块/实体后缀），再从整轮补；
+    // 老记录没有 topicPhrases，读取端按 [] 回落。
+    const topicPhrases = topicPhrasesOf(userTexts, assistantTexts);
+    const summary = summaryOf(userTexts, assistantTexts, topicPhrases);
+    const terms = extractTerms(corpus, [sessionId, ...topicPhrases]);
+    const topics = [...new Set([...topicPhrases, ...terms.filter((term) => /[\u3400-\u4dbf\u4e00-\u9fff]/.test(term))])].slice(0, 5);
     const digest = turnDigest(events, seqStart, seqEnd);
     const anchor = makeSessionTurnAnchor({ sessionId, turn, seqStart, seqEnd, digest, status: 'live' });
     const frameIndexes = [...new Set(list.map((event) => seqToFrame.get(event.seq)).filter((value) => Number.isInteger(value)))];
@@ -471,12 +677,13 @@ export function extractTurns(header, events, frames = [], texts = []) {
       kind,
       topics,
       terms,
+      topicPhrases,
       summary,
       counts,
       anchors: [anchor],
       digest,
       frameIndexes,
-      rawText: rawTextFor({ kind, summary, terms, topics, project }),
+      rawText: rawTextFor({ kind, summary, terms, topics, topicPhrases, project }),
       source: 'rebuild',
     });
   }

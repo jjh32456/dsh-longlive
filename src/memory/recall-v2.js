@@ -13,7 +13,6 @@ import { memoryError, memoryRootFromConfig } from './paths.js';
 import { memoryRecall } from './recall.js';
 import { scanCards } from './index.js';
 import { appendAuditRecord } from './audit-records.js';
-import { searchAutoCards } from './auto-cards.js';
 
 export const RECALL_V2_SCHEMA = 'memory-recall-v2/v1';
 export const FAST_ANSWER_MAX_CHARS = 300;
@@ -134,7 +133,7 @@ export function recallV2(args = {}, config = {}) {
   const cards = new Map((scanCards(root) || []).map((card) => [card.rel, card]));
   let hits = [];
   for (const row of Array.isArray(recalled.results) ? recalled.results : []) {
-    if (row?.type === 'event') continue; // AutoCards are appended below, after curated cards.
+    if (row?.type === 'event') continue; // D2: event/AutoCard layer is cold archive, not recalled.
     const card = cards.get(row.path);
     const cardFields = card?.fields ?? {};
     const cardStatus = cardFields.status ?? 'active';
@@ -157,25 +156,9 @@ export function recallV2(args = {}, config = {}) {
     if (hits.length >= topK) break;
   }
   const gate = evidenceGate({ hits, question: query });
-  // 1.8.0 AutoCards: at most one event card supplements up to two curated hits;
-  // the original turn coordinate and a session_original hint travel with it.
-  const autoHits = searchAutoCards({ memoryRoot: root, query, limit: 3 }).slice(0, 1).map((card) => ({
-    card: `auto:${card.cardId}`,
-    cardId: card.cardId,
-    eventId: card.eventId,
-    kind: 'auto-card',
-    anchor: { kind: 'session_turn', ...card.anchor, status: 'live' },
-    quote: String(card.title ?? '').replace(/\s+/gu, ' ').trim().slice(0, 240),
-    score: 1,
-    originalHint: `可读原文 session_original(turn=${card.anchor.turn})`,
-    original: {
-      sessionId: card.anchor.sessionId,
-      turn: card.anchor.turn,
-      how: `session_original(turn=${card.anchor.turn})`,
-    },
-  }));
+  // 1.8.2 D2: no auto-card read; hits are curated cards only.
   const curatedHits = hits.slice(0, Math.min(2, topK));
-  hits = [...curatedHits, ...autoHits].slice(0, topK);
+  hits = [...curatedHits].slice(0, topK);
   const finalGate = evidenceGate({ hits, question: query });
   const fastAnswer = finalGate.fastEligible ? buildFastAnswer({ question: query, hit: hits[0], gate: finalGate }) : null;
   // §16.8-D: every recall entry writes one unified read-audit row (行数=调用数).

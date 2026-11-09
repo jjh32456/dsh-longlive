@@ -1,6 +1,6 @@
 # CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
-适用版本：**1.8.0**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.8.3**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---
@@ -35,6 +35,8 @@ YAML 路径建议一律用正斜杠（例如 `<memory-root>/topics` 这种写法
 | `sharedBrain.thinkingInjection` | `true` | `sharedBrain: { thinkingInjection: false }` |
 | `autoMaintenance.enabled` | `true` | `autoMaintenance: { enabled: false }` |
 | `autoConclusion` | `true` | `autoConclusion: false` |
+| `conclusionDraft.ttlDays` | `30` | `conclusionDraft: { ttlDays: 14 }`（候选未蒸馏过期归档） |
+| `conclusionDistill.enabled` | `true` | `conclusionDistill: { enabled: false }`（A1 仍写候选池，只是不蒸馏） |
 | `memoryV2.enabled` / `role.enabled` / `answerGuard.enabled` | `true`（1.8.0 既有） | 各自 `enabled: false` |
 | `d2.enabled` / `d6.enabled` | `true` | `d2: { enabled: false }` / `d6: { enabled: false }` |
 | `routerFace.enabled` | `true` | `routerFace: { enabled: false }` |
@@ -51,6 +53,41 @@ session-longlive:
   config:
     autoRecall: { enabled: false }
     workers: { enabled: false }
+```
+
+### 0.5.1 A1 结论候选池 / 蒸馏（1.8.3-rc.1）
+
+A1 的结论不再直接写 `topics/`。默认行为是：
+
+- `autoConclusion: true`：每个完成的 turn 只在 **user 消息**命中决定触发时，把候选写进
+  `<memoryRoot>/.longlive/index/conclusion-drafts.jsonl`（`conclusion-draft/v1`，append-only，
+  `sourceRole:'user'`）。assistant 文本只作上下文，不参与判定；fact 类口头禅（结论/最后/
+  所以/因此/总结/确认）不触发。候选文件不在 `topics/` 下，recall / recall-v2 / INDEX 都扫不到。
+- 每日维护（`maintenance.js`）读取 `pending` 候选：先验证当前 L0 的 **user turn** digest +
+  候选的 **完整 userText**（`userTextHash` 一致，且该 turn 某条 user/message 归一化相等）；
+  title/excerpt/text 必须能在 userText 原文中找到；再过 `distill.js` 的 L2 gate / 零新事实 / 隐私复查。
+  通过后只写 `.longlive/staging/auto-cards/<slug>.md`（`salience:2`、`tags:[auto-conclusion,distilled,staged]`）；
+  卡面只由 userText/excerpt 构成，**不写 assistant 文本**；该目录被 `scanCards` 明确跳过，
+  **不进入召回首选面**，需后续人工/梦审提升为正式主题卡。
+- `session_turn` 锚点必须当前 L0 可验且绑定用户原文；无 L0/伪造文本/隐私命中 → rejected，不建卡。
+- `conclusionDraft.ttlDays`（默认 30）到期且未蒸馏的候选标 `expired`，复制/归档到
+  `<memoryRoot>/.longlive/archive/conclusion-drafts/`，不删除；TTL 独立于蒸馏开关。
+- `conclusionDistill.enabled: false` 只停“候选→卡”蒸馏，A1 继续收候选，TTL 继续运行；
+  `autoConclusion: false` 才全关。
+- 既有 `topics/conclusion-*` 卡不会被改写或删除；rc.5 首次维护会运行
+  `scripts/migrate-a1-legacy.mjs --apply` 同类迁移：1.8.0 旧直写卡 → `legacy-1.8.0/`，
+  rc.1–3 `topics/auto/` → staging；详见 [A1-MIGRATION.md](A1-MIGRATION.md)。
+- **升级/回滚**：rc.4 新 auto 卡在 `.longlive/staging/auto-cards/`，1.8.0/1.8.3 scanCards 都扫不到
+  （1.8.0 实测 0 命中）；rc.2/rc.3 遗留 `topics/auto/` 由 rc.4 首次维护 job 自动迁移，迁移前
+  直接回滚仍可能被 1.8.0 递归扫到，回滚前先跑一次 rc.4 维护或手工移出。升级 1.8.0→1.8.3
+  保留旧卡与候选数据。
+
+```yaml
+session-longlive:
+  config:
+    autoConclusion: true
+    conclusionDraft: { ttlDays: 30 }
+    conclusionDistill: { enabled: true }
 ```
 
 ---
@@ -80,13 +117,21 @@ autoTruncate:
 |---|---|---|---|---|---|
 | `enabled` | boolean | `true` | `true` / `false` | 是 | 1.8.0 起默认开启（仍默认 `mode: dryrun`，只规划不直接切会话）；显式 `false` 时 `evaluate` 在写日志之前就早退（`disabled`） |
 | `mode` | string | `dryrun` | `log` \| `dryrun` \| `request` | 是 | 1.6.0 起默认 `dryrun`（只规划不写会话）。**没有 `on`**。写 `on` → `AUTO_BAD_MODE`，整条 entry 不激活。旧值 `apply` 会被改写成 `request` 并记 `modeAlias:"apply->request"`（`src/auto-truncate.js:64,117-125`） |
-| `tokensThreshold` | integer | `300000` | ≥ 1 | 是 | 阈值比较是 `estimate.tokens >= tokensThreshold`（`src/auto-truncate.js:435`）。`tokens` 是**启发式估算**：对 `MESSAGE_TYPES` 事件的 data JSON 取字符数 ÷ 4（`src/truncate-visible.js:80`），不是宿主计费 token，两者偏差**待核实**。阈值压到几千只适合演练 |
+| `tokensThreshold` | integer | `350000`（1.8.3 策略线） | ≥ 1 | 是 | 阈值比较是 `estimate.tokens >= tokensThreshold`（`src/auto-truncate.js:435`）。`tokens` 是**启发式估算**：对 `MESSAGE_TYPES` 事件的 data JSON 取字符数 ÷ 4（`src/truncate-visible.js:80`），不是宿主计费 token，两者偏差**待核实**。阈值压到几千只适合演练 |
 | `minTurns` | integer | `12` | ≥ 1 | 是 | 条件对 turn 数是**严格大于**：`estimate.turns > minTurns`（同 435 行）。`minTurns: 1` 表示第 2 个 turn 起才可能触发 |
 | `cooldownMinutes` | integer | `60` | ≥ 0 | 是 | 每会话冷却；**低于阈值的评估也会消耗冷却窗口**（同文件 438-440 注释）。`0` 只用于 VM 采样：超过阈值后每个 turn 都会评估并尝试写请求（single-flight，已有请求不会被覆盖），生产别用 |
 | `keepTurns` | integer | `12` | ≥ 1 | 是 | 交给 runner 的"至少保留轮数"；实际切点由 `planVisibleTruncation` 重算，双边界取**更晚**的一个（保留更少），见 `src/truncate-visible.js:437-597` |
 | `keepTokens` | integer | `80000` | ≥ 1 | 是 | 同上；按估算 token 算保留后缀。两个值都调小 = 切得更狠 |
 | `appExe` | string | `""` | 可执行文件绝对路径 | 是 | 空 → 运行时用 `process.execPath`（宿主进程 exe，`src/auto-truncate.js:321-328`）。runner 关闭/重启应用用的是 request 里记录的 `app.exe`，这里写错 → runner 关错进程或起不来（exit 6） |
 | `profile` | string | `desktop` | 字符串（只是标签） | 是 | 只写进 request 的 `app.profile` 和 runner 日志，**runner 重启时并不传 profile 参数**（`explorer.exe "<appExe>"`，脚本 118 行）；写错不会切 profile，但会让排障误判。未来是否用于多 profile 启动**待核实** |
+| `logMaxBytes` | integer | `8388608` | ≥ 65536 | 是 | 1.8.3-rc.7 新增的 passthrough 键（不进 settings schema 计数）：`auto-truncate.log` 与 `hot-truncate-diag.jsonl` 按大小轮转的阈值 |
+| `logMaxAgeDays` | integer | `14` | ≥ 0 | 是 | 轮转份保留天数；0 = 不按日期删（只按份数） |
+| `logMaxFiles` | integer | `5` | ≥ 1 | 是 | 每个日志最多保留的轮转份数，超出按 mtime 删最旧 |
+| `logRotateDaily` | boolean | `true` | `true` / `false` | 是 | 跨本地日自动轮转；测试可关 |
+
+- 1.8.3-rc.7 起，评估状态写到 `<memoryRoot>/.longlive/auto-truncate-status.json`，并镜像到 `<memoryRoot>/.longlive/status.json` 的 `autoTruncate` 字段；`/api/longlive/status` 也会带出 `autoTruncate`。字段包括 `mode`（dryrun 显式可见）、`over.count` / `over.maxTokens`、`counters.error` / `counters.infeasible`、`lastError` / `lastInfeasible`、`warning`。
+- 每次归档（`session_truncate_visible` 写盘或 `scripts/truncate-cli.mjs` 写盘）追加一行 `<memoryRoot>/.longlive/hot-truncate-diag.jsonl`：session/turn/计划切点/retainTurns/tokens/文件大小/结果 ok|degraded|fail/failReason/耗时。dryrun 不归档，因此不写该文件。
+- **S2 启动状态/诊断口径（1.8.3）**：longlive 启用时，启动/维护会为可观测性写 `.longlive/status.json`、`.longlive/auto-truncate-status.json`（自动截断启用时）及对应诊断 jsonl；这是设计行为，不是“`.longlive` 零文件”。longlive 不加载或对应 kill switch 关闭后，不再新增这些状态/诊断文件；测试应断言“不写 engineMismatch / 无新增诊断”，不要断言整个 `.longlive` 目录不存在。
 
 补充：
 
@@ -133,7 +178,7 @@ patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 
           mode: cut
           retainTurns: 4
           retainTokens: 8000
-          autoMinTokens: 300000
+          autoMinTokens: 350000
 ```
 
 只覆盖要改的键即可：profile 的 `cordis.patch.yml` 按 `id` 合并，不必重复整段 `- insert:`。
@@ -154,7 +199,7 @@ patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 
 | `hotTruncate.mode` | string | `cut` | `off` \| `cut` \| `auto` | 是 | `off` 让位 stock；`cut` 在宿主每步按阈值检查并响应压缩调用；`auto` 再加 `agent/status=idle` 时自动切。非法值在 `normalizeOptions` 直接抛错，entry 回退 stock（`src/compaction/engine-core.js`） |
 | `hotTruncate.retainTurns` | integer | `4` | ≥ 0 | 是 | 切完保留最近 4 轮完成对话；只有**同时**满足轮数与 token 下限的整轮才留下，未完成的轮永远不切 |
 | `hotTruncate.retainTokens` | integer | `8000` | ≥ 0 | 是 | 保留窗口的估算 token 下限；与 `retainTurns` 一起决定切点 |
-| `hotTruncate.autoMinTokens` | integer | `300000` | ≥ 0 | 是 | 自动切（`cut` 的每步压力检查、`auto` 的空闲切）达到该估算 token 数才剪；手动 `/compact` 与请求溢出恢复不受此限。默认 300k 是为了避开前缀缓存失效——每次切刀改写上下文前缀，下一轮剩余上下文全价重算 |
+| `hotTruncate.autoMinTokens` | integer | `350000`（1.8.3 策略线；1.6.4 历史默认 300k） | ≥ 0 | 是 | 自动切（`cut` 的每步压力检查、`auto` 的空闲切）达到该估算 token 数才剪；手动 `/compact` 与请求溢出恢复不受此限。1.8.3 默认 350k（1.6.4 历史 300k）是为了避开前缀缓存失效——每次切刀改写上下文前缀，下一轮剩余上下文全价重算 |
 
 **成本理由**：切刀不调 LLM，但会改写上下文前缀，使模型的前缀缓存失效，下一轮要按全价重算
 剩余上下文。1.6.3 的 30k 触发 + 6 轮保留在长对话里几乎每轮一刀；1.6.4 改成 300k 触发 +
@@ -162,8 +207,9 @@ patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 
 
 ### 1.4b D2 工具输出裁剪 `d2`（默认开启）
 
-配置形态是嵌套对象；1.8.0 起默认开启（缺省即挂 `tools/post-execute`）；只有显式 `d2.enabled: false` 才不挂。
-一切保持原样。
+配置形态是嵌套对象；1.8.0 起**默认开启**（缺省即挂 `tools/post-execute`）；只有显式
+`d2.enabled: false` 才是 kill switch、不挂载。`d2.enabled` 缺省/`true` 都挂载；旧文档里
+“只有字面 true 才开”已废弃。
 
 ```yaml
 d2:
@@ -173,7 +219,7 @@ d2:
 
 | 键 | 类型 | 默认值 | 合法值 / 范围 | 改了要重启？ | 风险与说明 |
 |---|---|---|---|---|---|
-| `d2.enabled` | boolean | `false` | 仅字面 `true` 开启 | 是 | 关闭时不注册钩子、不建目录、不读会话；开启后单条工具结果超限即裁剪 |
+| `d2.enabled` | boolean | `true` | `false` 显式关闭；缺省/`true` 开启 | 是 | 默认挂 `tools/post-execute`；`false` 时不注册钩子、不建目录、不读会话；开启后单条工具结果超限即裁剪 |
 | `d2.maxInlineChars` | integer | `4096` | 64..1000000（超范围夹回） | 是 | 上下文里保留的字符上限（头 + 提示行 + 尾）；夹回逻辑见 `src/tool-output.js` 的 `normalizeD2Config` |
 | `d2.headRatio` | number | `0.6` | 0..1（夹回） | 是 | 头部占保留预算的比例，其余给尾部；提示行本身不占这个预算 |
 | `d2.skipTools` | string[] | `["read"]` | 工具名数组 | 是 | `read` 默认跳过：它本来就是按需分页读文件，再裁一次会让读回归档变成死循环 |
@@ -188,7 +234,7 @@ d2:
   上下文只留一行占位。扫描或写盘失败 → fail-open，原文照常进入上下文，不阻断 turn。
 - **与宿主内置 `spill-policy` 的关系**：D2 的监听不带 `{prepend:true}`，在其它 policy 之后
   执行并用自己的 content 覆盖最终决定，所以归档路径不会被 spill 的临时目录替换。
-- **回退**：`d2.enabled: false`（或删除整个 `d2` 块）后重启；已归档文件不动会话，可保留
+- **回退**：显式写 `d2.enabled: false` 后重启；已归档文件不动会话，可保留
   取证或手工删除。
 
 ### 1.4c D6 工具面裁剪 v1 `d6`（默认开启）
@@ -240,7 +286,7 @@ d6:
 | `memoryRoot` | string | `~/.dsh/longlive-memory` | 目录 | 是 | 面板只读这个目录。插件配了显式根（本机示例 `<memory-root>`）而面板没配 → **面板显示 0 卡**（它读的是默认空目录），不是记忆丢了 |
 | `sessionsRoot` | string | `~/.dsh/sessions` | 目录 | 是 | "截断记录"页读这里的 `<会话目录>/truncate.json`、`truncate-visible.json`（宿主可见对话截断账本）和 `backups.json`（并 stat 账本里记的备份文件）；两份截断账合并后按时间倒序列出。指错 → 该页空白 |
 
-面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。1.8.0 是配套本版的「六层视图活体行排序 + 已归档折叠（按需物化）」与外部评审 v1 回执修复版；本机 `desktop` profile 之前装的是旧版面板，升级到 1.8.0 的装法/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
+面板也可以用环境变量 `DSH_LONGLIVE_MEMORY_ROOT` / `DSH_MEM` 覆盖 `memoryRoot`。1.8.0 是配套本版的「六层视图活体行排序 + 已归档折叠（按需物化）」与外部复核 v1 回执修复版；本机 `desktop` profile 之前装的是旧版面板，升级到 1.8.0 的装法/验证/卸载见包内 `INSTALL.md`，装完或改配置后必须重启宿主。
 
 **1.6.0 新增：插件自带的设置页伴侣**（不是上面的面板包）。`package.json` 的 `./client` +
 `src/ui/*` 在宿主设置页的插件行注册 `plugins.row.config`，标题「久视 · 功能开关」，提供 7 个
@@ -571,7 +617,7 @@ config:
     autoTruncate:
       enabled: true
       mode: log                   # 只规划 + 写一行日志，绝不写会话
-      tokensThreshold: 300000     # 默认值；先观察真实日志估算离阈值多远
+      tokensThreshold: 350000     # 1.8.3 策略线默认值；先观察真实日志估算离阈值多远
       minTurns: 12
       cooldownMinutes: 60
       keepTurns: 12
@@ -678,3 +724,18 @@ Get-Item "<memory-root>\.longlive\router-runtime.jsonl" | Select-Object Length,L
 
 规划中、**当前没有对应配置键**的东西：scope 打分、过滤器（panel 的"过滤器决策"页返回
 `implemented:false`）、常驻看门进程/计划任务。不要为它们编配置项。
+
+---
+
+## engram 兼容范围与升级注意（1.8.3-rc.6）
+
+- 适配范围：**0.11.0 – 0.13.9**；测试覆盖 **0.13.6 / 0.13.9** 两套同构工具清单。
+  适配器按 `engram_` 前缀探测工具，不 import 第三方实现；工具缺失时降级到文件记忆（topics/journal）。
+- 0.13.9 把嵌入运行时（transformers.js/onnxruntime）挪到 optionalDependencies：
+  缺嵌入时插件仍可安装，adapter 仍为 **active**、文件记忆照常；告警
+  `core.warnEmbedderUnavailable` / `vectors-missing` 可见，可在干净环境跑
+  `node node_modules/@kenz1117/dsh-engram/scripts/backfill-embeddings.mjs <dbDir>` 补齐。
+- 0.13.7 起 `reflect` 并入 `ingest` 并在会话开始注入 reflect 提示；注入标记
+  `<engram_profile>` / `<engram_memory_context>` / `<engram_selection_rationale>` 继续兼容。
+- 升级前必须备份整个 engram DB 目录；升级后核 `SCHEMA_VERSION=15`、行数、`PRAGMA integrity_check`、
+  向量非空数；缺向量再跑 backfill。真实 DB 升级/回滚步骤见 `engram-0.13.9/UPGRADE-CHECKLIST.md`（评测工作区，不随包分发）。

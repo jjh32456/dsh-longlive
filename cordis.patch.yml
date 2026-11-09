@@ -5,8 +5,9 @@
 #         memoryRoot: <memory-root>
 # Router policy defaults to the generic profile (no personal house rules).
 # Override with a name from src/router/policies/<name>.json:
-#         routerPolicyProfile: <profile-name>
+#         routerPolicyProfile: owner-rulings-2026-11-03
 #
+# 1.8.3: subtraction D1-D5 (D2 default-on lineage) / engram 0.13.9 + A1 migration.
 # 1.8.0 product default: features are all enabled here. Explicit false opts out; enabling one never enables
 # another. When several are on, message order is [user, boot, runtime, auto]:
 # boot is the identity open card (agent/pre-step, prepend:true) and auto is
@@ -32,7 +33,7 @@
           mode: cut
           retainTurns: 4
           retainTokens: 8000
-          autoMinTokens: 300000
+          autoMinTokens: 350000
           minCutTokens: 0
 - insert:
     - id: session-longlive

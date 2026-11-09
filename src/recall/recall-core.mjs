@@ -733,7 +733,6 @@ export function buildQueryText({
  * ------------------------------------------------------------------ */
 
 export const TRIGGER_DEFAULTS = Object.freeze({
-  everyNTurns: 6,        // 心跳：每 6 轮即使没换话题也重扫一次
   switchContainment: 0.25, // 当前消息的 bigram 有多少还留在上次查询里；低于它算换了话题
 });
 
@@ -742,7 +741,7 @@ export const TRIGGER_DEFAULTS = Object.freeze({
  * @param {number} [input.step] 本轮的第几个 model step（宿主 pre-step 的 payload.step）
  * @param {number} [input.turn] 本会话第几个用户轮（从 1 开始）
  * @param {string} [input.queryText]
- * @param {{lastQueryText?:string, compactedSinceLast?:boolean, turnsSinceLast?:number}} [input.state]
+ * @param {{lastQueryText?:string, compactedSinceLast?:boolean}} [input.state]
  * @param {object} [input.options] 覆盖 TRIGGER_DEFAULTS
  * @returns {{recall:boolean, why:string}}
  */
@@ -754,7 +753,6 @@ export function decideTrigger({ step = 1, turn = 0, queryText = '', state = {}, 
   if (state.compactedSinceLast === true) return { recall: true, why: 'after-compaction' };
   const last = String(state.lastQueryText || '');
   if (last !== '' && norm(last) === norm(queryText)) return { recall: false, why: 'same-as-last' };
-  if (turn % opt.everyNTurns === 0) return { recall: true, why: 'every-n-turns' };
   if (last !== '' && containment(queryText, last) < opt.switchContainment) {
     return { recall: true, why: 'topic-switch' };
   }

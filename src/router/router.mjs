@@ -68,7 +68,7 @@ const USAGE = `R1 Router-A — 规则层命令行
   router.mjs --list [--json] [--profile <name>]
   router.mjs --help
 
-策略：默认 profile=generic；--profile <profile-name> 可加载家规叠加层（只许收窄）。
+策略：默认 profile=generic；--profile owner-rulings-2026-11-03 可加载家规叠加层（只许收窄）。
 `;
 
 function parseArgs(argv) {

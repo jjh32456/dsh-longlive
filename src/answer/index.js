@@ -45,6 +45,7 @@ import {
 import { appendAuditRecord } from '../memory/audit-records.js';
 import { retrieveEvidenceWithSecondHop } from './second-hop.mjs';
 import { appendAuditRow, auditFilePath, auditMetrics, readAuditRows } from './audit.js';
+import { scrubText } from '../util/redact.js';
 import { buildTurnItems } from '../original.js';
 import { parseSession } from '../codec.js';
 import { dshHome } from '../home.js';
@@ -276,6 +277,13 @@ function ensureArray(value) {
 export function registerAnswerGuard(ctx, config = {}, options = {}) {
   const raw = config?.answerGuard ?? config?.answer_guard ?? config?.guardAnswers ?? {};
   const cfg = normalizeAnswerGuardConfig(raw);
+  // S1: 顶层 audit 块（只读本块，不动 answerGuard 既有字段）。
+  const auditCfg = config?.audit && typeof config.audit === 'object' ? config.audit : {};
+  const auditRedact = auditCfg.redact !== false;
+  const auditRetentionRaw = Number(auditCfg.retentionDays);
+  const auditRetentionDays = Number.isInteger(auditRetentionRaw) && auditRetentionRaw > 0 && auditRetentionRaw <= 3650
+    ? auditRetentionRaw
+    : 30;
   // FIX-05：fixture 元数据（canAbstain/evidenceUnits/difficulty/questionType）只能由
   // query/audit 调用方提供；拿不到就返回 null（投递判定=不适用），绝不臆测。
   const resolveQuestionMeta = typeof options.resolveQuestionMeta === 'function' ? options.resolveQuestionMeta : null;
@@ -801,10 +809,19 @@ export function registerAnswerGuard(ctx, config = {}, options = {}) {
     // 只读调试字段：eval 元数据接缝状态（map-hit/unset/invalid/not-applicable）。
     row.evalMetaSource = st.evalMetaSource ?? 'not-applicable';
     if (cfg.audit && memoryRoot) {
-      const written = appendAuditRow(memoryRoot, row, { maxBytes: cfg.auditMaxBytes });
+      const written = appendAuditRow(memoryRoot, row, {
+        maxBytes: cfg.auditMaxBytes,
+        redact: auditRedact,
+        retentionDays: auditRetentionDays,
+        now,
+      });
       if (!written.ok) warn('AUDIT_WRITE_FAILED', new Error(written.error ?? 'unknown'));
       // A5 unified audit: answer audit is mirrored into .longlive/audit/records.jsonl
       // (questionId 口径 = ag-001…；本版暂无则显式 unknown，不臆造).
+      // S1: 同一份 scrub 也用于镜像的 answerText，避免凭据从第二条通道落盘。
+      const mirroredAnswerText = typeof row.assistantText === 'string'
+        ? (auditRedact ? scrubText(row.assistantText).text : row.assistantText)
+        : null;
       try {
         appendAuditRecord({
           memoryRoot,
@@ -813,7 +830,7 @@ export function registerAnswerGuard(ctx, config = {}, options = {}) {
           readerTier: 'host',
           questionId: typeof row.questionId === 'string' && row.questionId !== '' ? row.questionId : 'unknown',
           expectedTurns: Array.isArray(row.evidenceTurns) && row.evidenceTurns.length > 0 ? row.evidenceTurns.length : null,
-          answerText: typeof row.assistantText === 'string' ? row.assistantText : null,
+          answerText: mirroredAnswerText,
           extra: {
             verdict: row.verdict,
             turn: row.turn ?? null,
@@ -823,6 +840,8 @@ export function registerAnswerGuard(ctx, config = {}, options = {}) {
             deliveryForced: row.delivery?.forced === true,
             forcedAbstainInjection: row.forcedAbstainInjection === true,
             evalMetaSource: row.evalMetaSource ?? 'not-applicable',
+            redaction: row.redaction ?? null,
+            retentionDays: auditRetentionDays,
           },
         });
       } catch { /* answer auditing must never break the guard */ }

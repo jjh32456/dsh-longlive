@@ -1,4 +1,4 @@
-# QUICKSTART — 五步跑通（1.8.0）
+# QUICKSTART — 五步跑通（1.8.3）
 
 目标：在一台新机器上，5 步内让 `@jjh32456/dsh-longlive` 装好、能用、能回滚、能卸干净。
 完整背景见 [README.md](README.md)，逐码排错见 [docs/ERRORS.md](docs/ERRORS.md)，
@@ -42,7 +42,7 @@ $DSH = '<DSH 安装目录>\resources\runtime\cli\bin\dsh.cmd'
 先把包放到固定目录，核对 sha256，再装进一个**新 profile**：
 
 ```powershell
-$TGZ = '<path-to>\jjh32456-dsh-longlive-1.8.0.tgz'
+$TGZ = '<path-to>\jjh32456-dsh-longlive-1.8.3.tgz'
 Get-FileHash -Algorithm SHA256 $TGZ      # 对照同目录的 .tgz.sha256
 
 $LLPROFILE = 'fresh0723b'
@@ -54,7 +54,7 @@ $LLPROFILE = 'fresh0723b'
 & $DSH plugin --profile $LLPROFILE list --depth 0
 ```
 
-`list` 应出现 `@jjh32456/dsh-longlive@1.8.0`。`dsh plugin --profile <新名字> add` 自己也会初始化
+`list` 应出现 `@jjh32456/dsh-longlive@1.8.3`。`dsh plugin --profile <新名字> add` 自己也会初始化
 profile，但那样只带 `@deepseek-ai/dsh-base`；要网页 UI 和与本文一致的验证，先用
 `--from-default-profile web` 建模板 profile。
 
@@ -67,8 +67,8 @@ profile，但那样只带 `@deepseek-ai/dsh-base`；要网页 UI 和与本文一
 ```powershell
 Set-Location <仓库根目录>
 & $NODE test\run.mjs
-# 仓库内开发脚本（npm 包不含）\n& $NODE scripts\pack.mjs --expect-version 1.8.0
-# 产物：dist\jjh32456-dsh-longlive-1.8.0.tgz（+ .sha256）
+# 仓库内开发脚本（npm 包不含）\n& $NODE scripts\pack.mjs --expect-version 1.8.3
+# 产物：dist\jjh32456-dsh-longlive-1.8.3.tgz（+ .sha256）
 ```
 
 `pack.mjs`（仓库内开发脚本，npm 包不含）只负责打包，不跑测试；`--expect-version` 会在版本不匹配时拒绝出包。
@@ -79,7 +79,7 @@ Set-Location <仓库根目录>
 宿主正在跑、且当前 profile 就是目标 profile 时：
 
 ```
-plugin_manager action=install_bundle target="file:<path-to>/jjh32456-dsh-longlive-1.8.0.tgz"
+plugin_manager action=install_bundle target="file:<path-to>/jjh32456-dsh-longlive-1.8.3.tgz"
 ```
 
 目标必须是**绝对路径**，且需要上面说的权限。装完按宿主提示重载（或重启该 profile）。

@@ -27,6 +27,7 @@ import { memoryRootFromConfig, resolveInside, relativePath } from './paths.js';
 import { ensureDir, writeFileAtomic } from './state.js';
 import { memoryConsolidate } from './consolidate.js';
 import { memoryForget } from './forget.js';
+import { runConclusionDistillJob } from './conclusion-distill.js';
 
 export const SCHEDULE_VERSION = 1;
 export const SCHEDULE_REL = path.join('.longlive', 'bridge', 'schedule.json');
@@ -94,6 +95,10 @@ function emptyState() {
     lastForgetPending: null,
     lastForgetPendingCount: null,
     lastForgetError: null,
+    lastConclusionDistillDate: null,
+    lastConclusionDistillAt: null,
+    lastConclusionDistillResult: null,
+    lastConclusionDistillError: null,
     lastRunAt: null,
     lastRunDay: null,
     lastTrigger: null,
@@ -106,14 +111,16 @@ function normalizeState(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return state;
   state.lastConsolidateDate = isDay(raw.lastConsolidateDate) ? raw.lastConsolidateDate : null;
   state.lastForgetDate = isDay(raw.lastForgetDate) ? raw.lastForgetDate : null;
+  state.lastConclusionDistillDate = isDay(raw.lastConclusionDistillDate) ? raw.lastConclusionDistillDate : null;
   for (const key of [
     'lastConsolidateAt', 'lastConsolidateReport',
     'lastForgetAt', 'lastForgetPending',
+    'lastConclusionDistillAt',
     'lastRunAt', 'lastRunDay', 'lastTrigger',
   ]) {
     if (raw[key] == null || typeof raw[key] === 'string') state[key] = raw[key] ?? null;
   }
-  for (const key of ['lastConsolidateError', 'lastForgetError']) {
+  for (const key of ['lastConsolidateError', 'lastForgetError', 'lastConclusionDistillError']) {
     const value = raw[key];
     if (value == null) {
       state[key] = null;
@@ -133,6 +140,16 @@ function normalizeState(raw) {
   for (const key of ['lastConsolidateProposals', 'lastForgetPendingCount']) {
     if (Number.isFinite(raw[key])) state[key] = raw[key];
   }
+  state.lastConclusionDistillResult = raw.lastConclusionDistillResult
+    && typeof raw.lastConclusionDistillResult === 'object'
+    && !Array.isArray(raw.lastConclusionDistillResult)
+    ? {
+      archived: Number(raw.lastConclusionDistillResult.archived) || 0,
+      distilled: Number(raw.lastConclusionDistillResult.distilled) || 0,
+      rejected: Number(raw.lastConclusionDistillResult.rejected) || 0,
+      skipped: Number(raw.lastConclusionDistillResult.skipped) || 0,
+    }
+    : null;
   state.runs = Array.isArray(raw.runs)
     ? raw.runs.filter((entry) => entry && typeof entry === 'object').slice(-RUN_HISTORY_LIMIT)
     : [];
@@ -411,7 +428,8 @@ export function runDailyMaintenance({
   const day = isDay(config.today) ? config.today.trim() : dayString(at);
   const wantConsolidate = config.consolidate !== false;
   const wantForget = config.forget !== false;
-  if (!wantConsolidate && !wantForget) {
+  const wantDrafts = config.autoConclusion !== false;
+  if (!wantConsolidate && !wantForget && !wantDrafts) {
     return { ok: true, ran: false, reason: 'disabled', day, trigger };
   }
 
@@ -422,6 +440,7 @@ export function runDailyMaintenance({
     trigger,
     consolidate: null,
     forget: null,
+    conclusionDistill: null,
     state: null,
     corruptState: false,
   };
@@ -443,7 +462,8 @@ export function runDailyMaintenance({
 
   let needConsolidate = wantConsolidate && state.lastConsolidateDate !== day;
   let needForget = wantForget && state.lastForgetDate !== day;
-  if (!needConsolidate && !needForget) {
+  let needDrafts = wantDrafts && state.lastConclusionDistillDate !== day;
+  if (!needConsolidate && !needForget && !needDrafts) {
     return { ...summary, reason: 'already-ran-today', state };
   }
 
@@ -466,7 +486,8 @@ export function runDailyMaintenance({
     state = latest.state;
     needConsolidate = wantConsolidate && state.lastConsolidateDate !== day;
     needForget = wantForget && state.lastForgetDate !== day;
-    if (!needConsolidate && !needForget) {
+    needDrafts = wantDrafts && state.lastConclusionDistillDate !== day;
+    if (!needConsolidate && !needForget && !needDrafts) {
       return { ...summary, reason: 'already-ran-today', state };
     }
 
@@ -535,8 +556,38 @@ export function runDailyMaintenance({
       }
     }
 
+    // ---- B3: A1 conclusion drafts -> distilled topic cards -----------------
+    // Distillation is a maintenance concern: raw A1 output stays in the draft
+    // pool; only validated, source-anchored extracts reach topics/. A failure
+    // here is recorded and audited but never thrown to the caller.
+    if (needDrafts) {
+      try {
+        const result = runConclusionDistillJob({
+          memoryRoot: root, config, now: at,
+          sessionsRoot: config.sessionsRoot,
+        });
+        summary.conclusionDistill = { status: 'ran', ...result };
+        state.lastConclusionDistillDate = day;
+        state.lastConclusionDistillAt = isoStamp(at);
+        state.lastConclusionDistillResult = {
+          archived: result.archived ?? 0,
+          distilled: result.distilled ?? 0,
+          rejected: result.rejected ?? 0,
+          skipped: result.skipped ?? 0,
+        };
+        state.lastConclusionDistillError = null;
+      } catch (error) {
+        summary.conclusionDistill = { status: 'failed', ...errorInfo(error) };
+        state.lastConclusionDistillError = { ...errorInfo(error), at: isoStamp(at), day };
+        warnTo(
+          logger,
+          `[auto-maintenance] conclusion distill 失败（${summary.conclusionDistill.code}）— ${summary.conclusionDistill.message}；候选保留，不影响对话`,
+        );
+      }
+    }
+
     // ---- state -------------------------------------------------------------
-    if (!summary.consolidate && !summary.forget) {
+    if (!summary.consolidate && !summary.forget && !summary.conclusionDistill) {
       return { ...summary, reason: 'nothing-to-do', state };
     }
     summary.ran = true;

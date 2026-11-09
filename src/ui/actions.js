@@ -1,7 +1,7 @@
 // src/ui/actions.js — M2-G 面板动作面（preview → apply → audit → undo）
 //
 // 契约（MEMORY-RECALL-V2-PROPOSAL v2.6.3 §12.4 / §12.7）：
-//   - 16 个动作名（唯一权威词表，未知动作 400 `E_ACTION_UNKNOWN`）；
+//   - 18 个动作名（唯一权威词表，未知动作 400 `E_ACTION_UNKNOWN`）；
 //   - 四段：preview（60s TTL，不落库）→ apply（CAS + 幂等 + 私有目录执行 + HMAC 审计）
 //     → audit（GET 只读链）→ undo（24h 窗口、不可再 undo）；
 //   - 待判队列状态机：pending→approved|rejected|returned → applied|failed → undone；

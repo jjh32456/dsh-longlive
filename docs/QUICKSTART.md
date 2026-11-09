@@ -1,8 +1,14 @@
 # 从零到第一次截断（QUICKSTART）
 
+> **1.8.3 A1 升级/回滚注意**：A1 只生成 `.longlive/staging/auto-cards/` 隐藏 staging 候选，不在召回面。
+> rc.4 的 staging 在 `.longlive/` 下，1.8.0/1.8.3 的 scanCards 都扫不到；rc.2/rc.3 遗留的
+> `topics/auto/` 会由 rc.4 维护 job 自动迁入 staging。迁移前直接回滚，先手工把 `topics/auto/`
+> 移出 topics（1.8.0 会递归扫 topics）。rc.5 另会把 1.8.0 旧 `topics/conclusion-t*.md` 迁到
+> `legacy-1.8.0/`；见 docs/A1-MIGRATION.md。升级 1.8.0→1.8.3 不需要清旧卡。详见 FEATURES.md。
+
 **读完你会得到什么**：从一台已经装好 DSH 的 Windows 机器出发，装好 longlive，用 `dryrun` 看它「打算怎么剪」，再切到 `request`，最后安全地完成第一次真截断，并且知道怎么退回去。
 
-> 适合谁：第一次拿到 `jjh32456-dsh-longlive-1.8.0.tgz` 的人。全程约 20 分钟，其中真截断那一步应用会自己关闭再打开（VM 实测约 31.5 秒），请挑你不用电脑的时候做。
+> 适合谁：第一次拿到 `jjh32456-dsh-longlive-1.8.3.tgz` 的人。全程约 20 分钟，其中真截断那一步应用会自己关闭再打开（VM 实测约 31.5 秒），请挑你不用电脑的时候做。
 >
 > 本文默认 DSH home 是 `%USERPROFILE%\.dsh`；如果你设过 `DSH_HOME`，把命令里的这段整体换掉。
 
@@ -32,7 +38,7 @@ $TGZ = '<path-to-tgz>'   # 换成真实绝对路径
 & $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
 
-**你应该看到**：`list` 里出现 `@jjh32456/dsh-longlive@1.8.0`；doctor 打印一张表，最后是「全部可选依赖已启用。」或只有 engram 缺失的提示。
+**你应该看到**：`list` 里出现 `@jjh32456/dsh-longlive@1.8.3`；doctor 打印一张表，最后是「全部可选依赖已启用。」或只有 engram 缺失的提示。
 
 **报错了怎么办**：
 - `ENOENT` → `file:` 后面必须是**真实存在的绝对路径**，用正斜杠；不要把 `~` 写进去。

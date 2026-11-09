@@ -27,6 +27,7 @@ import {
 } from '../src/deps.js';
 import { VERSION } from '../src/version.js';
 import { adapterHealth } from '../src/adapters/registry.js';
+import { cleanupStaleLocks } from '../src/util/stale-locks.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -129,8 +130,7 @@ function commandLine(dsh, name, profile) {
     : `${quoteCommand(dsh)} plugin add ${name}`;
 }
 
-function targetProfiles(profile) {
-  return String(profile ?? '')
+function targetProfiles(profile) {  return String(profile ?? '')
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean);
@@ -426,6 +426,59 @@ async function runSetup({ home, profile, entries, env, options }) {
   return exitCode;
 }
 
+/** Candidate memory roots for stale-lock cleanup (env → home default → profile config). */
+function memoryRootCandidates(home, env) {
+  const roots = new Set();
+  for (const key of ['DSH_LONGLIVE_MEMORY_ROOT', 'DSH_MEM']) {
+    const value = typeof env?.[key] === 'string' ? env[key].trim() : '';
+    if (value !== '') roots.add(value);
+  }
+  roots.add(path.join(home, 'longlive-memory'));
+  const profilesDir = path.join(home, 'profiles');
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(profilesDir, { withFileTypes: true });
+  } catch {
+    dirs = [];
+  }
+  for (const dir of dirs) {
+    if (!dir.isDirectory()) continue;
+    for (const name of ['cordis.patch.yml', 'cordis.yml', 'config.yml', 'config.yaml']) {
+      try {
+        const text = fs.readFileSync(path.join(profilesDir, dir.name, name), 'utf8');
+        const match = text.match(/^\s*memoryRoot:\s*["']?([^"'\r\n#]+)/m);
+        if (match) roots.add(match[1].trim());
+      } catch {
+        /* profile without that config file */
+      }
+    }
+  }
+  return [...roots].filter((root) => {
+    try {
+      return path.isAbsolute(root) && fs.existsSync(root);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** S1: doctor 也清理陈旧锁（与启动时同一判定；缺失 memoryRoot 时静默跳过）。 */
+function cleanupDoctorLocks(home, env) {
+  const report = { scanned: 0, removed: [], errors: [], roots: [] };
+  for (const root of memoryRootCandidates(home, env)) {
+    report.roots.push(root);
+    try {
+      const result = cleanupStaleLocks({ memoryRoot: root, env, logger: { warn() {} } });
+      report.scanned += result.scanned;
+      report.removed.push(...result.removed.map((item) => ({ root, ...item })));
+      report.errors.push(...result.errors.map((item) => ({ root, ...item })));
+    } catch (error) {
+      report.errors.push({ root, error: String(error?.message ?? error) });
+    }
+  }
+  return report;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -451,6 +504,7 @@ async function main() {
   }
 
   const applied = [];
+  const staleLocks = cleanupDoctorLocks(home, env);
   if (options.apply && entries.some((entry) => !entry.present)) {
     if (!process.stdin.isTTY && !options.yes) {
       process.stderr.write('--apply 在非交互环境需要 --yes 确认；本次没有执行任何安装。\n');
@@ -498,11 +552,16 @@ async function main() {
       independence: adapterHealth(),
       missing: entries.filter((entry) => !entry.present).map((entry) => entry.name),
       present: entries.filter((entry) => entry.present).map((entry) => entry.name),
+      staleLocks,
     };
     if (options.apply) payload.applied = applied;
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   } else {
     printTable({ home, profile: result.profile, rows, entries, applied, ok });
+    if (staleLocks.scanned > 0) {
+      process.stdout.write(`陈旧锁：扫描 ${staleLocks.scanned} 个，清理 ${staleLocks.removed.length} 个` +
+        `${staleLocks.errors.length > 0 ? `，失败 ${staleLocks.errors.length} 个` : ''}\n`);
+    }
   }
 
   process.exitCode = ok ? 0 : 1;

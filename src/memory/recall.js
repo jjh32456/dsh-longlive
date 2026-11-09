@@ -11,8 +11,8 @@
 
 import { memoryError, memoryRootFromConfig } from './paths.js';
 import { scanCards } from './index.js';
-import { readVerifiedAutoCards } from './auto-cards.js';
 import { readVerifiedCardAnchors } from './card-anchors.js';
+import { searchEventsReadOnly } from './event-index.js';
 
 export const RECALL_DEFAULT_TOPK = 3;
 export const RECALL_MAX_TOPK = 20;
@@ -207,9 +207,8 @@ export function memoryRecall(args, config = {}) {
     return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
   });
 
-  // 1.8.0 two-layer recall: curated cards are weighted slightly higher and take
-  // at most 2 of topK; AutoCards supplement with at most 1. A curated hit
-  // suppresses an event card on the same topic.
+  // 1.8.2 D2: auto-card layer removed. Only curated markdown cards are
+  // recalled; cards.jsonl stays as a cold read-only archive.
   const weighted = [...results].sort((left, right) => {
     const l = left.score * 1.12;
     const r = right.score * 1.12;
@@ -218,46 +217,8 @@ export function memoryRecall(args, config = {}) {
   });
   const manualCap = Math.min(2, topK);
   const manualResults = weighted.slice(0, manualCap);
-  const autoCards = (room === null && statuses.includes('active'))
-    ? readVerifiedAutoCards({ memoryRoot: root })
-    : [];
-  const autoResults = [];
-  const autoCap = Math.min(1, Math.max(0, topK - manualResults.length));
-  if (autoCap > 0) {
-    for (const card of autoCards) {
-      const pseudo = {
-        title: card.title,
-        body: [card.title, Array.isArray(card.terms) ? card.terms.join(' ') : ''].filter(Boolean).join('\n'),
-        fields: { tags: [] },
-      };
-      const { score, hits } = scoreCard(query, pseudo);
-      if (score <= 0 || hits.length === 0) continue;
-      // Suppress the same-topic event card when a curated card already hit.
-      if (manualResults.length > 0) {
-        const eventText = `${card.title} ${(card.terms ?? []).join(' ')}`.toLowerCase();
-        const sameTopic = manualResults.some((item) => {
-          const title = String(item.title ?? '').toLowerCase();
-          const overlap = recallTokens(title).filter((token) => eventText.includes(token)).length;
-          return overlap >= Math.max(2, Math.floor(recallTokens(title).length * 0.5));
-        });
-        if (sameTopic) continue;
-      }
-      const anchor = card.anchor;
-      autoResults.push({
-        path: `auto:${card.cardId}`,
-        title: card.title,
-        score,
-        excerpt: collapse(card.title).slice(0, 120),
-        cardId: card.cardId,
-        eventId: card.eventId,
-        type: 'event',
-        anchor,
-        originalHint: `可读原文 session_original(turn=${anchor.turn})`,
-      });
-      if (autoResults.length >= autoCap) break;
-    }
-  }
-  const top = [...manualResults, ...autoResults].slice(0, topK);
+  const top = [...manualResults].slice(0, topK);
+
 
   const base = {
     ok: true,
@@ -266,7 +227,9 @@ export function memoryRecall(args, config = {}) {
     room,
     statuses,
     scanned: scanned.length,
-    scannedEvents: autoCards.length,
+    scannedEvents: null,
+    autoCards: null,
+    eventFallback: null,
     count: top.length,
     results: top,
   };
@@ -275,7 +238,7 @@ export function memoryRecall(args, config = {}) {
       ...base,
       status: 'empty',
       code: 'E_RECALL_NO_MATCH',
-      message: `没有卡片命中「${query}」— 换更短/更具体的关键词，或放宽 room/status 过滤；本次扫描 ${scanned.length} 张卡${autoCards.length > 0 ? `、${autoCards.length} 张事件卡` : ''}`,
+      message: `没有卡片命中「${query}」— 换更短/更具体的关键词，或放宽 room/status 过滤；本次扫描 ${scanned.length} 张卡`,
     };
   }
   return { ...base, status: 'ok' };

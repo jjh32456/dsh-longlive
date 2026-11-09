@@ -10,7 +10,7 @@
 //     （dsh-session :1672-1687）给出按 surface 重放的消息序列。
 //   - dispose 在 create() 的返回值上，走与 unload 相同的 teardown（:1740-1746）。
 //
-// 评审 P0-2 的教训：旧实现调 handle.followup / handle.whenIdle / handle.result，
+// 复核 P0-2 的教训：旧实现调 handle.followup / handle.whenIdle / handle.result，
 // 在真宿主上直接 E_AGENT_IDLE（handle.followup is not a function）。
 //
 // 顺序仍然是 create -> followup -> whenIdle -> dispose（finally），任何一步失败

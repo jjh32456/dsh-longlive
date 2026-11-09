@@ -1,7 +1,7 @@
 /**
  * inject-position.js — 开机卡插入位置的**纯函数**（v4）。
  *
- * 评审第三轮 mustFix #2：宿主 TurnNavigator 取该轮**第一个**可见 `kind:'user'`
+ * 复核第三轮 mustFix #2：宿主 TurnNavigator 取该轮**第一个**可见 `kind:'user'`
  * 节点做 tooltip 的 prompt（`dsh-client-ui-chat/lib/client.js:8373-8383`），而
  * `source.kind:'user'` 的注入消息正好会变成可见 user 节点（同文件 :9887-9893）。
  * 所以开机卡不能再 unshift 到最前，否则第 1 轮 tooltip 显示【开机卡】而不是用户提问。
@@ -13,7 +13,7 @@
  * 也就是：插到**第一条真实 user 消息之后**；auto-recall 仍在内层 append 到末尾，
  * 它照样看得到 boot（路径级去重继续生效）。
  *
- * v4 / 评审第四轮 M1：source.kind 从 'user' 改为隐藏注入 kind 'session-reference'
+ * v4 / 复核第四轮 M1：source.kind 从 'user' 改为隐藏注入 kind 'session-reference'
  * （形状 `{kind, form:'recall', version:1, references:[]}`）。宿主把它投影成 context
  * 节点，`isVisibleChatNode()` 返回 false——【开机卡】不再变成聊天里的用户气泡；
  * deriveMessages 仍含正文。代价与可见性归属见 README「可见性」。

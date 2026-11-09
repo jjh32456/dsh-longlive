@@ -22,6 +22,21 @@ export const SAVE_ACTION = 'engram.save'
 export const FACTS_REPLACE_ACTION = 'engram.facts.replace'
 export const CLASSIFY_PLUGIN_LABEL = 'plugin:dsh-engram'
 export const EVIDENCE_PREFIX = 'engram:'
+/**
+ * Support matrix for the external engram plugin. Deliberately version-agnostic
+ * at the tool boundary: 0.11–0.13.9 all expose the same engram_* namespace and
+ * the same injection markers, so probe/degrade behavior is shared. The matrix
+ * is evidence, not a runtime semver gate.
+ */
+export const SUPPORTED_ENGRAM_VERSIONS = Object.freeze({
+  min: '0.11.0',
+  max: '0.13.9',
+  tested: ['0.13.6', '0.13.9'],
+  optionalEmbeddingFrom: '0.13.9',
+  markerNames: ['engram_profile', 'engram_memory_context', 'engram_selection_rationale'],
+  embeddingWarningCodes: ['core.warnEmbedderUnavailable', 'vectors-missing'],
+  note: '0.13.9 moves transformers.js/onnxruntime to optionalDependencies; missing embeddings do not remove tools and do not degrade file memory.',
+})
 export const LEGACY_TOOL_NAMES = Object.freeze(['memory_save'])
 export const INTERCEPTED_WRITE_TOOLS = Object.freeze([
   'engram_save',
@@ -54,6 +69,7 @@ export const DEGRADE_TARGETS = Object.freeze({
 export const SESSION_MARKER_PATTERNS = Object.freeze([
   /<engram_profile\b/i,
   /<engram_memory_context\b/i,
+  /<engram_selection_rationale\b/i,
 ])
 
 const DATA_FILES = Object.freeze({
@@ -116,12 +132,30 @@ function normalizeMode(value) {
   return value === 'active' || value === 'degraded' || value === 'absent' ? value : null
 }
 
+function normalizeEmbeddingStatus(value) {
+  if (typeof value === 'function') {
+    try { return normalizeEmbeddingStatus(value()); } catch { return normalizeEmbeddingStatus(null); }
+  }
+  if (!value || typeof value !== 'object') {
+    return { available: true, vectors: 'unknown', warnings: [], optional: true };
+  }
+  const warnings = Array.isArray(value.warnings) ? value.warnings.map(String) : [];
+  const vectors = typeof value.vectors === 'string' ? value.vectors : (value.available === false ? 'missing' : 'unknown');
+  return {
+    available: value.available !== false && vectors !== 'missing',
+    vectors,
+    warnings,
+    optional: true,
+  };
+}
+
 /**
  * @param {object} [options]
  * @param {() => string[]} [options.tools] 宿主可用工具名列表（探测依据，不 import 第三方）
  * @param {string} [options.mode] 显式覆盖 mode（测试/配置用）
  * @param {(tool: string, args: object) => any} [options.invoke] 宿主工具调用通道
  * @param {() => any} [options.afterProbe]
+ * @param {object|(() => object)} [options.embeddingStatus] 0.13.9 optional embedding 状态
  */
 export function createEngramAdapter(options = {}) {
   const toolsProvider = typeof options.tools === 'function' ? options.tools : () => (Array.isArray(options.tools) ? options.tools : [])
@@ -149,6 +183,7 @@ export function createEngramAdapter(options = {}) {
 
   function health() {
     const state = last || probe()
+    const embedding = normalizeEmbeddingStatus(options.embeddingStatus)
     return {
       id: ID,
       mode: state.mode,
@@ -156,6 +191,13 @@ export function createEngramAdapter(options = {}) {
       degraded: state.mode === 'degraded' || state.mode === 'absent',
       detail: state.mode === 'absent' ? '未探测到 engram 工具，降级为文件记忆（topics/journal）' : state.mode === 'degraded' ? 'engram 部分能力不可用' : 'engram 可用',
       evidence: state.evidence.slice(),
+      supportedVersions: SUPPORTED_ENGRAM_VERSIONS,
+      embedding: {
+        ...embedding,
+        // Missing vectors are an optional capability warning, not an adapter
+        // degradation: engram_* tools and file memory still work.
+        warningVisible: embedding.available === false || embedding.warnings.some((w) => SUPPORTED_ENGRAM_VERSIONS.embeddingWarningCodes.some((code) => w.includes(code))),
+      },
     }
   }
 
@@ -230,6 +272,7 @@ export function createEngramAdapter(options = {}) {
       CLASSIFY_PLUGIN_LABEL,
       EVIDENCE_PREFIX,
       SESSION_MARKER_PATTERNS,
+      SUPPORTED_ENGRAM_VERSIONS,
     }),
   }
 }

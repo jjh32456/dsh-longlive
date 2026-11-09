@@ -221,7 +221,7 @@ export async function consumeStream(stream, {
       pendingNext.catch(() => { /* the abandoned next() must not reject unhandled */ });
     }
     // 即使已经收到 finish，也关闭迭代器让生成器的 finally 执行；
-    // 但 return() 必须有时限：评审 P10 的生成器 return() 永不 resolve，
+    // 但 return() 必须有时限：复核 P10 的生成器 return() 永不 resolve，
     // 旧实现让整个 tick（以及 stop 的 awaitInflight）永久挂住。
     if (typeof iterator.return === 'function') {
       try {

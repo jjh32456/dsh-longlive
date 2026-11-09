@@ -8,7 +8,7 @@
 
 大概率是正常的。这个插件**没有自带界面**，默认 `mode: "log"` 也只会在后台写一行评估日志，不会弹窗、不会剪东西。
 
-按顺序确认：`dsh plugin --profile desktop list --depth 0` 有 `@jjh32456/dsh-longlive@1.8.0`；doctor 没有硬错误（退出码 0，或只有 engram 缺失导致的 1）；重启后新会话里能数到 22 个工具；聊到超过阈值后，`%USERPROFILE%\.dsh\longlive-memory\.longlive\logs\auto-truncate.log` 才出现评估行（默认阈值 300000，所以短时间内没有是正常的）。
+按顺序确认：`dsh plugin --profile desktop list --depth 0` 有 `@jjh32456/dsh-longlive@1.8.3`；doctor 没有硬错误（退出码 0，或只有 engram 缺失导致的 1）；重启后新会话里能数到 22 个工具；聊到超过阈值后，`%USERPROFILE%\.dsh\longlive-memory\.longlive\logs\auto-truncate.log` 才出现评估行（默认阈值 300000，所以短时间内没有是正常的）。
 
 如果这四样都没有，先看宿主启动 stderr 有没有 `1 entry did not activate`。
 
@@ -28,7 +28,7 @@
 22 是 longlive 自己注册的数量，不是「整个会话只有 22 个工具」。先确认你看的是**新会话**，且是装插件的那个 profile。
 
 - 一个都没有 → 插件没激活，看 stderr 的 `1 entry did not activate` 和紧随其后的错误。
-- 少几个 → 可能被 profile 的工具过滤挡住，或版本不是 1.8.0。
+- 少几个 → 可能被 profile 的工具过滤挡住，或版本不是 1.8.3。
 - 只有 `engram_*` 缺失 → 那是可选依赖没装，和 22 个工具无关。
 
 ## 4. 401 和 404 到底差在哪？
@@ -92,7 +92,7 @@
 
 四个独立证据，至少看到两个：
 
-1. `plugin list` 显示 `@1.8.0`；
+1. `plugin list` 显示 `@1.8.3`；
 2. doctor 没有硬错误（0，或只有 engram 缺失导致的 1）；
 3. 新会话能调用 `session_health`，返回里有 `sessionPath` / `events` / `visibleMessages`；
 4. 聊到超过阈值后，`auto-truncate.log` 出现评估行（`action` 是 `planned` / `dryrun-planned` / `none` 都算插件在评估）。

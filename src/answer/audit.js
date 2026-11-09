@@ -9,9 +9,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { appendJsonLine, withFileLock } from '../util/append-store.js';
+import { scrubJsonValue, redactionMetadata } from '../util/redact.js';
+
 export const AUDIT_DIRNAME = '.longlive';
 export const AUDIT_FILENAME = 'answer-audit/audit.jsonl';
 export const AUDIT_MAX_BYTES_DEFAULT = 2 * 1024 * 1024;
+/** S1: 审计行默认 TTL 元数据（删除执行归 S5 retention，本层只标注）。 */
+export const AUDIT_RETENTION_DAYS_DEFAULT = 30;
 
 export function auditFilePath(memoryRoot) {
   if (typeof memoryRoot !== 'string' || memoryRoot.trim() === '') return '';
@@ -20,19 +25,38 @@ export function auditFilePath(memoryRoot) {
 
 /**
  * 追加一行审计。永远不抛。
+ *
+ * S1 追加纪律：单写锁 + fsync + 坏行隔离（append-store）+ 写入前凭据 scrub。
+ * scrub 后仍保留审计用途：`redaction.originalSha256` / `originalLength` / `hits`
+ * 与 `retentionDays` + `retainUntil` 元数据；原文不落盘。
+ *
  * @param {string} memoryRoot
  * @param {object} row
- * @param {{maxBytes?:number}} [options]
- * @returns {{ok:boolean,path:string,rotated?:boolean,error?:string}}
+ * @param {{maxBytes?:number, redact?:boolean, retentionDays?:number, now?:Function}} [options]
+ * @returns {{ok:boolean,path:string,rotated?:boolean,code?:string,error?:string}}
  */
 export function appendAuditRow(memoryRoot, row, options = {}) {
   const file = auditFilePath(memoryRoot);
-  if (file === '') return { ok: false, path: '', error: 'E_NO_MEMORY_ROOT' };
+  if (file === '') return { ok: false, path: '', code: 'E_NO_MEMORY_ROOT', error: 'E_NO_MEMORY_ROOT' };
   const maxBytes = Number.isFinite(Number(options.maxBytes))
     ? Math.max(64 * 1024, Number(options.maxBytes))
     : AUDIT_MAX_BYTES_DEFAULT;
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
+  const retentionDays = Number.isInteger(Number(options.retentionDays)) && Number(options.retentionDays) > 0
+    ? Number(options.retentionDays)
+    : AUDIT_RETENTION_DAYS_DEFAULT;
+  const at = row && typeof row === 'object' && typeof row.at === 'string' ? row.at : new Date().toISOString();
+  const redact = options.redact !== false;
+  // 先 scrub（只改字符串叶子，不改行结构），再补审计元数据。
+  const scrubbed = scrubJsonValue(row && typeof row === 'object' ? row : { value: row }, { enabled: redact });
+  const auditRow = scrubbed.value && typeof scrubbed.value === 'object' && !Array.isArray(scrubbed.value)
+    ? { ...scrubbed.value }
+    : { value: scrubbed.value };
+  const meta = redactionMetadata(scrubbed, { retentionDays, at });
+  auditRow.redaction = meta;
+  auditRow.retentionDays = retentionDays;
+  auditRow.retainUntil = meta.retainUntil;
+
+  const write = () => {
     let rotated = false;
     try {
       const stat = fs.statSync(file);
@@ -43,11 +67,32 @@ export function appendAuditRow(memoryRoot, row, options = {}) {
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
     }
-    const line = `${JSON.stringify(row)}\n`;
-    fs.appendFileSync(file, line, 'utf8');
+    const written = appendJsonLine({
+      file,
+      row: auditRow,
+      label: 'answer-audit',
+      skipLock: true,
+      healthRoot: memoryRoot,
+      now: options.now,
+      quarantineDir: path.join(path.resolve(String(memoryRoot)), '.longlive', 'quarantine'),
+    });
+    return { written, rotated };
+  };
+
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 轮转 + 追加在同一个 per-file 锁内完成，避免两个进程同时 rename/append。
+    const locked = withFileLock(file, write, { waitMs: 2_000 });
+    if (!locked.ok) {
+      return { ok: false, path: file, code: locked.code ?? 'E_APPEND_LOCKED', error: locked.error?.message ?? locked.code ?? 'E_APPEND_LOCKED' };
+    }
+    const { written, rotated } = locked.value;
+    if (!written.ok) {
+      return { ok: false, path: file, code: written.code ?? 'E_APPEND_IO', error: written.error?.message ?? written.code ?? 'E_APPEND_IO', rotated };
+    }
     return { ok: true, path: file, rotated };
   } catch (error) {
-    return { ok: false, path: file, error: String(error?.code ?? error?.message ?? error) };
+    return { ok: false, path: file, code: error?.code ?? 'E_APPEND_IO', error: String(error?.message ?? error) };
   }
 }
 

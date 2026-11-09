@@ -14,7 +14,8 @@
 // D2 does, and both agree on the name.
 //
 // Safety envelope:
-//   - off by default: `d2.enabled !== true` registers no listener at all;
+//   - ON by default (1.8.0 behavior): `d2.enabled !== false` mounts the listener;
+//     an explicit `d2.enabled: false` is the kill switch and mounts nothing;
 //   - fail-open: every failure keeps the untouched decision and never throws
 //     out of the hook (a broken trim must not break a turn);
 //   - the privacy gate (`privacyScan`) scans the FULL text before anything is
@@ -32,8 +33,11 @@ import path from 'node:path';
 
 import { archiveFileName, textOfParts } from './original.js';
 import { privacyScan } from './recall/privacy.mjs';
+import { scrubText, redactionMetadata } from './util/redact.js';
 
 export const D2_DEFAULTS = Object.freeze({
+  // Default ON to match deployed 1.8.0 behavior and the config schema; only an
+  // explicit `d2.enabled: false` (or the features-level kill switch) disables.
   enabled: true,
   maxInlineChars: 4096,
   headRatio: 0.6,
@@ -42,6 +46,25 @@ export const D2_DEFAULTS = Object.freeze({
 });
 export const D2_MIN_MAX_INLINE_CHARS = 64;
 export const D2_MAX_MAX_INLINE_CHARS = 1_000_000;
+
+/** S1: tool-output 落盘的 TTL/scrub 默认值（删除执行归 S5 retention）。 */
+export const TOOL_OUTPUT_DEFAULTS = Object.freeze({
+  redact: true,
+  retentionDays: 90,
+});
+export const TOOL_OUTPUT_META_SCHEMA = 'tool-output-meta/v1';
+
+/** Normalise the top-level `toolOutput` config block; bad values fall back. */
+export function normalizeToolOutputConfig(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const retentionDays = Number(source.retentionDays);
+  return {
+    redact: source.redact !== false,
+    retentionDays: Number.isInteger(retentionDays) && retentionDays > 0 && retentionDays <= 3650
+      ? retentionDays
+      : TOOL_OUTPUT_DEFAULTS.retentionDays,
+  };
+}
 
 /** Where D2 keeps tool output for a memory root (D3's convention). */
 export function toolOutputRoot(memoryRoot) {
@@ -60,9 +83,9 @@ function clampNumber(value, fallback, min, max) {
 }
 
 /**
- * Normalise `config.d2`. Unknown/invalid values fall back to the defaults
- * instead of failing activation: a typo must not disable a working feature or,
- * worse, make it trim at a nonsense size.
+ * Normalise `config.d2`. Missing config means default ON (1.8.0 behavior);
+ * only an explicit boolean `false` is the kill switch. Unknown/invalid values
+ * for budgets fall back to the defaults instead of failing activation.
  */
 export function normalizeD2Config(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
@@ -214,6 +237,21 @@ function writeArchiveAtomic(dir, file, text) {
   }
 }
 
+/** Atomic sidecar metadata write (never throws: metadata loss must not fail the archive). */
+function writeArchiveMetaAtomic(dir, file, meta) {
+  const target = `${file}.meta.json`;
+  const tmp = `${target}.tmp-${process.pid}-${Date.now().toString(36)}`;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(tmp, `${JSON.stringify(meta, null, 2)}\n`, 'utf8');
+    fs.renameSync(tmp, target);
+    return { ok: true, file: target };
+  } catch (error) {
+    try { fs.unlinkSync(tmp); } catch { /* best effort */ }
+    return { ok: false, file: target, error: String(error?.message ?? error) };
+  }
+}
+
 /**
  * The whole decision, one call. Pure over its inputs except the injected
  * `scan` / `writeArchive` / `now`, which is what makes the five acceptance
@@ -232,7 +270,9 @@ export function decideToolOutputTrim({
   turn,
   scan = privacyScan,
   writeArchive = writeArchiveAtomic,
+  writeMeta = writeArchiveMetaAtomic,
   nextIndex = () => 0,
+  now = () => new Date(),
 }) {
   if (!settings?.enabled) return { action: 'off', decision };
   if (!decision || decision.kind !== 'accept') return { action: 'keep', decision };
@@ -271,10 +311,42 @@ export function decideToolOutputTrim({
   const seq = nextIndex();
   const dir = toolOutputDir(memoryRoot, turn);
   const file = path.join(dir, archiveFileName({ kind: 'tool', toolCallId: callId || null, seq }));
-  writeArchive(dir, file, text);
+
+  // S1: 凭据类 scrub 先于落盘；原文 sha256 / 长度 / 命中类型写进 sidecar
+  // `<archive>.meta.json`，TTL 元数据留给 S5 retention 使用（本层不删除）。
+  const retentionDays = Number.isInteger(settings.retentionDays) && settings.retentionDays > 0
+    ? settings.retentionDays
+    : TOOL_OUTPUT_DEFAULTS.retentionDays;
+  const scrubbed = scrubText(text, { enabled: settings.redact !== false });
+  writeArchive(dir, file, scrubbed.text);
+  const at = (() => {
+    try {
+      const value = typeof now === 'function' ? now() : now;
+      const date = value instanceof Date ? value : new Date(value);
+      return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  })();
+  const meta = {
+    ...redactionMetadata(scrubbed, { retentionDays, at }),
+    schema: TOOL_OUTPUT_META_SCHEMA,
+    turn,
+    callId: callId || null,
+    toolName: toolName || null,
+    originalBytes: bytes,
+    at,
+  };
+  const metaWritten = (() => {
+    try {
+      return writeMeta(dir, file, meta);
+    } catch (error) {
+      return { ok: false, error: String(error?.message ?? error) };
+    }
+  })();
 
   const { head, tail, headChars, tailChars, omittedChars } = splitHeadTail(
-    text,
+    scrubbed.text,
     settings.maxInlineChars,
     settings.headRatio,
   );
@@ -290,7 +362,15 @@ export function decideToolOutputTrim({
   const inline = [head, notice, tail].filter((part) => part !== '').join('\n\n');
   return {
     action: 'trimmed',
-    info: { chars, bytes, file, turn, headChars, tailChars, omittedChars, inlineChars: inline.length },
+    info: {
+      chars, bytes, file, turn, headChars, tailChars, omittedChars, inlineChars: inline.length,
+      redacted: scrubbed.changed,
+      redactionHits: scrubbed.hits,
+      originalSha256: scrubbed.originalSha256,
+      retentionDays,
+      metaFile: `${file}.meta.json`,
+      metaWritten: metaWritten?.ok === true,
+    },
     decision: { ...decision, content: replaceTextParts(content, inline) },
   };
 }
@@ -308,6 +388,8 @@ export function createTrimHandler({
   nextIndex = () => 0,
   scan = privacyScan,
   writeArchive = writeArchiveAtomic,
+  writeMeta = writeArchiveMetaAtomic,
+  now = () => new Date(),
   onTrimmed = null,
 } = {}) {
   return async function trimToolResult(exec, result, next) {
@@ -328,6 +410,8 @@ export function createTrimHandler({
         turn: currentTurn(exec),
         scan,
         writeArchive,
+        writeMeta,
+        now,
         nextIndex,
       });
       if (outcome.action === 'trimmed' && typeof onTrimmed === 'function') {
@@ -351,7 +435,12 @@ export function createTrimHandler({
  * `ctx.effect`.
  */
 export function registerToolOutputTrim(ctx, config, { memoryRoot = null, logger = null } = {}) {
-  const settings = normalizeD2Config(config?.d2);
+  const toolCfg = normalizeToolOutputConfig(config?.toolOutput);
+  const settings = {
+    ...normalizeD2Config(config?.d2),
+    redact: toolCfg.redact,
+    retentionDays: toolCfg.retentionDays,
+  };
   if (!settings.enabled) return { enabled: false, registered: false, settings };
   if (!memoryRoot) {
     warn(logger ?? ctx?.logger, 'tool-output trim enabled but memoryRoot is unset — not registered');

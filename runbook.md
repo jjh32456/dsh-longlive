@@ -312,3 +312,15 @@ memory_reinforce { path: "../../../etc/passwd" }
 **校验点**：抛错且 `error.code === "E_PATH_OUTSIDE_ROOT"`，消息里带这个码；根外文件 mtime/sha256 不变；根内不产生任何临时文件。另外，`memoryRoot` 未配置时是 `E_MEMORY_ROOT_UNSET`，不是越界——两种错误要分清。
 
 **不要做的事**：不要为了“让它跑通”改成根外绝对路径、不要给 `memoryRoot` 配一个包含 `..` 的路径、不要在根外手工建 `.longlive/` 再指过去。工具会拒绝，这是正确的行为，不是 bug。
+
+## 9. clean-env 裸 profile 的 Web 依赖（rc.6 记录）
+
+- 用临时 `$DSH_HOME` + 裸 profile 做 clean-env 演练时，profile 若没有 web 壳，`dsh --profile <name> --port ...` 会报
+  `pending (waiting for service: webServer)`。必须显式加 `@deepseek-ai/dsh-web-app`（或从 shipped web 模板
+  创建 profile）：
+
+  ```powershell
+  & $DSH plugin --profile cleanweb add "@deepseek-ai/dsh-web-app"
+  ```
+
+- A1 clean-env 演练使用的 `cleanweb` 就是从 shipped web 模板创建的；裸 profile 直接装 longlive+panel 不够。

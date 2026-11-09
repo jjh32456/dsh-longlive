@@ -39,6 +39,7 @@ import {
 } from './codec.js';
 import { sessionError, formatBytes, isInboxEvent, assertNotLive } from './truncate.js';
 import { ensureBackup, verifyBackup, sha256File } from './backup.js';
+import { appendHotTruncateDiag, hotTruncateDiagOptions } from './hot-truncate-diag.js';
 
 export const VISIBLE_CONFIRM_WORD = 'TRUNCATE-VISIBLE';
 export const DEFAULT_KEEP_TURNS = 12;
@@ -799,6 +800,19 @@ export function planVisibleTruncation(parsed, options = {}) {
         `(ceiling ${budgetCeiling}) after dropping ${cutTurnIndex} turn(s); ` +
         'the carried first-user message is already capped',
       attempts: null,
+      limit: {
+        kind: 'deepest-legal-cut-still-over-budget',
+        deepestCutTurn: turns[cutTurnIndex].turn,
+        deepestCutSeq: cutIndex,
+        keptTurns: turns.length - cutTurnIndex,
+        afterTokens: projection.tokens,
+        keepTokens,
+        ceiling: budgetCeiling,
+        // A single retained turn (or the protected head + archive card) cannot
+        // be split by this tool. Dropping the whole conversation is not a safe
+        // fallback, so the caller must surface this as an explicit limit.
+        note: 'cannot drop the last whole turn without dropping the entire visible conversation',
+      },
     },
     carryFirstUserMessage: firstUserDropped && carryFirstUserMessage,
     insertArchiveCard,
@@ -1651,6 +1665,7 @@ export function resolveVisibleCut(parsed, options = {}) {
         candidates: null,
         survived: null,
         budget: plan.budget,
+        limit: plan.infeasible.limit ?? null,
       };
       attempts.push({
         attempt,
@@ -1699,7 +1714,15 @@ export function resolveVisibleCut(parsed, options = {}) {
         survived: built.retainedEvents,
       };
     } catch (error) {
-      if (error?.code !== ERROR_CODES.NO_BOUNDARY) throw error;
+      // 1.8.1-rc.7: a replacement that straddles the cut is a boundary problem,
+      // not a reason to give up. The previous build threw it straight out of
+      // resolveVisibleCut, so the retry ladder never got a chance; dropping one
+      // more whole turn can put the cut after the replacement's start/end pair.
+      // NO_BOUNDARY is the existing retryable class; keep the list explicit so
+      // an unrelated write/verify error is still surfaced immediately.
+      const retryable = error?.code === ERROR_CODES.NO_BOUNDARY
+        || error?.code === ERROR_CODES.REPLACEMENT_STRADDLES_CUT;
+      if (!retryable) throw error;
       lastError = error;
       attempts.push({
         attempt,
@@ -1831,6 +1854,47 @@ export function truncateVisibleSession(sessionPath, options = {}) {
   const eventsPerFrame = options.eventsPerFrame ?? DEFAULT_EVENTS_PER_FRAME;
   const log = [];
   const abs = path.resolve(sessionPath);
+  // 1.8.1-rc.7: one durable diagnostic row per non-dry-run truncation attempt.
+  // The archive is the operation that matters; a failure after the archive is
+  // still a failed truncation, and is recorded with archiveWritten:true.
+  const diagStartedAt = Date.now();
+  const diagRoot = typeof options.memoryRoot === 'string' && options.memoryRoot.trim() !== ''
+    ? options.memoryRoot.trim()
+    : null;
+  const diagOptions = options.diagOptions && typeof options.diagOptions === 'object'
+    ? options.diagOptions
+    : hotTruncateDiagOptions(options.autoTruncate ?? {});
+  let diagArchiveWritten = false;
+  let diagEmitted = false;
+  function emitTruncationDiag(payload) {
+    if (dryRun || !diagRoot || diagEmitted) return;
+    diagEmitted = true;
+    const written = appendHotTruncateDiag(diagRoot, {
+      sessionId: options.sessionId ?? parsed?.header?.id ?? null,
+      turn: options.turn ?? payload.turn ?? null,
+      sessionPath: abs,
+      plannedCut: payload.plannedCut ?? null,
+      retainTurns: keepTurns,
+      retainTokens: keepTokens,
+      tokensBefore: payload.tokensBefore ?? null,
+      tokensAfter: payload.tokensAfter ?? null,
+      bytesBefore: payload.bytesBefore ?? null,
+      bytesAfter: payload.bytesAfter ?? null,
+      archivePath: payload.archivePath ?? null,
+      archiveWritten: payload.archiveWritten === true,
+      archiveBytes: payload.archiveBytes ?? null,
+      archiveEvents: payload.archiveEvents ?? null,
+      attempts: payload.attempts ?? null,
+      result: payload.result,
+      degradeReason: payload.degradeReason ?? null,
+      failReason: payload.failReason ?? null,
+      durationMs: Math.max(0, Date.now() - diagStartedAt),
+      diagnosticsVersion: 1,
+    }, diagOptions);
+    if (!written.ok && typeof options.logger?.warn === 'function') {
+      options.logger.warn(`[truncate-visible] diag write failed: ${written.error ?? 'unknown'}`);
+    }
+  }
 
   if (!fs.existsSync(abs)) {
     throw visibleError(ERROR_CODES.NOT_FOUND,
@@ -1901,9 +1965,23 @@ export function truncateVisibleSession(sessionPath, options = {}) {
       archivePath: null,
       before: { ...sessionEstimate(parsed), sha256: snapshot.sha256 },
       attempts: resolved.attempts,
+      limit: resolved.plan?.infeasible?.limit ?? error?.details?.limit ?? null,
     };
     if (!dryRun) {
-      // Writing mode: nothing is ever written on an infeasible cut.
+      // Writing mode: nothing is ever written on an infeasible cut. Record the
+      // attempt (result:fail) before throwing so a future audit can tell
+      // "nothing to do" from "tried and could not".
+      emitTruncationDiag({
+        result: 'fail',
+        failReason: `${resolved.code ?? ERROR_CODES.NO_BOUNDARY}: ${resolved.reason ?? 'infeasible'}`,
+        tokensBefore: sessionEstimate(parsed).tokens,
+        bytesBefore: snapshot.size,
+        attempts: resolved.attempts?.length ?? 0,
+        plannedCut: resolved.plan
+          ? { turn: resolved.plan.cutTurn ?? null, seq: resolved.plan.cutIndex ?? null }
+          : null,
+        archiveWritten: false,
+      });
       throw error;
     }
     const infeasible = {
@@ -1920,6 +1998,7 @@ export function truncateVisibleSession(sessionPath, options = {}) {
       code: resolved.code,
       reason: resolved.reason,
       attempts: resolved.attempts,
+      limit: resolved.plan?.infeasible?.limit ?? error?.details?.limit ?? null,
       cut: null,
       before: { ...sessionEstimate(parsed), sha256: snapshot.sha256 },
       // The report still needs these shapes; an empty plan is honest about it.
@@ -2011,6 +2090,7 @@ export function truncateVisibleSession(sessionPath, options = {}) {
       'Re-run with a different session, or move/rename the existing archive after checking it.');
   }
   writeDurable(archivePath, archive.buffer);
+  diagArchiveWritten = true;
   const archiveCheck = parseSession(fs.readFileSync(archivePath));
   if (archiveCheck.events.length !== archive.events) {
     throw visibleError(ERROR_CODES.ARCHIVE_VERIFY,
@@ -2134,6 +2214,21 @@ export function truncateVisibleSession(sessionPath, options = {}) {
       afterSha256: built.sha256,
     });
     result.message = formatVisibleReport(result);
+    emitTruncationDiag({
+      result: (resolved.attempts?.length ?? 0) > 1 ? 'degraded' : 'ok',
+      degradeReason: (resolved.attempts?.length ?? 0) > 1 ? 'boundary-retry (dropped extra turn)' : null,
+      plannedCut: { turn: plan.cutTurn, seq: plan.cutIndex },
+      turn: plan.cutTurn,
+      tokensBefore: plan.original.tokens,
+      tokensAfter: built.tokens,
+      bytesBefore: snapshot.size,
+      bytesAfter: built.bytes,
+      archivePath,
+      archiveWritten: true,
+      archiveBytes: archive.bytes,
+      archiveEvents: archive.events,
+      attempts: resolved.attempts?.length ?? 0,
+    });
     return result;
   } catch (error) {
     // The target is only touched by the rename. If the rename already landed
@@ -2154,6 +2249,21 @@ export function truncateVisibleSession(sessionPath, options = {}) {
     if (restore?.ok) result.rollback = rollbackCommand(backup.file, abs);
     log.push({ step: 'failed', ok: false, code: error?.code ?? 'VISIBLE_TRUNCATE_FAILED', message: error.message });
     result.log = log;
+    emitTruncationDiag({
+      result: 'fail',
+      failReason: `${error?.code ?? 'VISIBLE_TRUNCATE_FAILED'}: ${error?.message ?? String(error)}`,
+      plannedCut: { turn: plan.cutTurn, seq: plan.cutIndex },
+      turn: plan.cutTurn,
+      tokensBefore: plan.original.tokens,
+      tokensAfter: result.restored ? plan.original.tokens : built.tokens,
+      bytesBefore: snapshot.size,
+      bytesAfter: result.restored ? snapshot.size : built.bytes,
+      archivePath,
+      archiveWritten: diagArchiveWritten || fs.existsSync(archivePath),
+      archiveBytes: archive.bytes,
+      archiveEvents: archive.events,
+      attempts: resolved.attempts?.length ?? 0,
+    });
     error.result = result;
     throw error;
   }

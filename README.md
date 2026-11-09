@@ -3,7 +3,7 @@
 > 1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；1.6.4 起发布名改为 scoped 包
 > `@jjh32456/dsh-longlive`（npm 包名），显示名仍是「久视」（英文 Longlive）；
 > 1.6.3 在 1.6.0 基线上新增**热截断**（cut-only 压缩引擎，见下文「版本与边界」），这一项是 1.5.0
-> 没有的能力；1.6.4 把热截断默认值收到 **300k 触发 / 保留 4 轮**，并修复 D6 重启后首轮冻结
+> 没有的能力；1.6.4 把热截断默认值收到 **350K 策略触发 / 保留 4 轮**，并修复 D6 重启后首轮冻结
 > （G3）与可移植性收口。升级步骤见 [docs/MIGRATION-1.6.0.md](docs/MIGRATION-1.6.0.md)。
 >
 > 1.6.8 在 1.6.7 之上并入**共享大脑活动流**（`sharedBrain.activity`，1.6.8 时默认关闭、1.8.0 起默认开启，与
@@ -70,7 +70,7 @@ longlive 的做法，是把「我」从会话里搬出来，做成一个**共享
 - **默认不自动杀进程**。插件本体不关应用；只有你手动运行 `auto-truncate-run.ps1`，或装了看门并切到 request 模式时，它才会关宿主、剪完再打开。
 - **不修已经损坏的会话**，也不恢复你手动删掉的消息。
 
-## 隐私与身份（1.8.0）
+## 隐私与身份（1.8.3）
 
 - **默认中性身份**：1.8.0 起发布包与内置提示不含具体人名/角色；身份由你在记忆根下的 `IDENTITY.md` 定义（不建文件时使用中性默认）。蒸馏的 who 字段默认空，由你显式配置注入。
 - **发布包隐私扫描**：打包时扫绝对路径/个人目录名等 blocker，计数必须为 0 才允许发版（发版门）；包内不含记忆库、会话日志或本机路径。
@@ -97,7 +97,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.0.tgz"
+& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.3.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
@@ -121,7 +121,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
   `.longlive/router/`、不起定时器。显式打开后先多 4 个 `router_*`（22→26）；再开
   `routerProposalEnabled` 多 3 个（26→29）。开关与默认值见 [docs/FEATURES.md](docs/FEATURES.md)
   和 [docs/CONFIG.md](docs/CONFIG.md)，建议先只开 `routerEnabled` 观察。
-- **D2/D6 默认开启（1.8.0 起，显式 `false` 可关）**：`d2.enabled` 做工具输出裁剪（超长结果落盘、正文只留头尾），
+- **D2/D6 默认开启（1.8.0 起，显式 `false` 可关）**：`d2.enabled` 做工具输出裁剪（超长结果落盘、正文只留头尾；缺省即挂载，显式 `d2.enabled: false` 才不挂），
   `d6.enabled` 打开工具面裁剪（默认仍是 22 个工具，打开后多一个 `tool_search` 用来找回
   被裁掉的工具）。打开方式、预算与回退见 [docs/FEATURES.md](docs/FEATURES.md) 和
   [docs/CONFIG.md](docs/CONFIG.md)。
@@ -143,9 +143,16 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 开发、打包与回滚细节见 [docs/DEV.md](https://github.com/jjh32456/dsh-longlive/blob/main/docs/DEV.md)（仓库内文档，npm 包不含）。
 
+## 1.8.3 阈值（策略 vs 可强制）
+
+- 官方：1M 是**输入+输出共享窗口**；384K 是 `max_tokens` 上限；超限 `finish_reason=length`。
+- 固定策略：正常预留 192K / 长输出预留 350K；input≥350K 策略折叠线；输入硬截断触发线正常 **757K**、长输出 **599K**（`input+reserve+50K ≥ 1M`，等号算超；不是硬截断）；safety 50K。
+- 可强制边界：hotTruncate.autoMinTokens=350K / autoTruncate turn-end 评估可由插件执行；主模型 `max_tokens` 不可配（仅 router face 1024），350K 只是策略预留+告警/分段提示，**不能本轮强制折叠**。
+- 折叠后对外口径：实测中位约 **52K**（23 次压缩）；目标 **84K（52–84K）**未实现（无 targetTokens），未测出前不宣称 84K。详见 [docs/THRESHOLDS.md](docs/THRESHOLDS.md)。
+
 ## 版本与边界
 
-- 本套文档对应 **1.8.0** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+- 本套文档对应 **1.8.3** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
   1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
   **1.8.0 变更**：有据才答注入修复 + 来源闸（默认关闭的信心闸、证据投递修复，见
   [docs/ANSWER-GUARD.md](docs/ANSWER-GUARD.md)）、共享大脑 thinking（默认开启，仅摘要）、
@@ -160,7 +167,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
   `compaction-basic` 行并插入 `compaction-hot-truncate`；只切「已完成、且早于保留窗口（默认 4 轮 /
   8000 token）」的整轮，切前先把原文归档到 `<memoryRoot>/.longlive/hot-truncate/`，再用一条覆盖率指针
   替换 surface，system 提示永远不被切；引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 仍可用。
-  自动切（`cut` 的每步检查与 `auto` 的空闲切）要在估算上下文达到 **300k token** 才动手：每切一刀都会改写上下文前缀，让模型的
+  自动切（`cut` 的每步检查与 `auto` 的空闲切）要在估算上下文达到 **350K token**（1.8.3 策略线）才动手：每切一刀都会改写上下文前缀，让模型的
   前缀缓存失效、下一轮剩余上下文全价重算，所以默认把阈值拉高、只保留最近 4 轮，切刀频率从「每轮一刀」
   降到「十几轮一刀」。**阈值与保留轮数都可调**：在 profile 的 `cordis.patch.yml` 里按
   `- id: compaction-hot-truncate` 覆盖 `hotTruncate.autoMinTokens` / `hotTruncate.retainTurns`，
@@ -173,3 +180,18 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
   title×2 + scope×3，卡无 scope 回退正文）；`DSH_LONGLIVE_SCOPE=0` 可回到纯 title+body 做 A/B。
 - 「按重要度**决定记什么**」（过滤器执行准入、在写入前拦截）仍是**未并入**能力；不要把只读的
   `decisions-*.jsonl` 当成已经存在的准入门槛。
+
+---
+
+## engram 兼容范围与升级注意（1.8.3-rc.6）
+
+- 适配范围：**0.11.0 – 0.13.9**；测试覆盖 **0.13.6 / 0.13.9** 两套同构工具清单。
+  适配器按 `engram_` 前缀探测工具，不 import 第三方实现；工具缺失时降级到文件记忆（topics/journal）。
+- 0.13.9 把嵌入运行时（transformers.js/onnxruntime）挪到 optionalDependencies：
+  缺嵌入时插件仍可安装，adapter 仍为 **active**、文件记忆照常；告警
+  `core.warnEmbedderUnavailable` / `vectors-missing` 可见，可在干净环境跑
+  `node node_modules/@kenz1117/dsh-engram/scripts/backfill-embeddings.mjs <dbDir>` 补齐。
+- 0.13.7 起 `reflect` 并入 `ingest` 并在会话开始注入 reflect 提示；注入标记
+  `<engram_profile>` / `<engram_memory_context>` / `<engram_selection_rationale>` 继续兼容。
+- 升级前必须备份整个 engram DB 目录；升级后核 `SCHEMA_VERSION=15`、行数、`PRAGMA integrity_check`、
+  向量非空数；缺向量再跑 backfill。真实 DB 升级/回滚步骤见 `engram-0.13.9/UPGRADE-CHECKLIST.md`（评测工作区，不随包分发）。

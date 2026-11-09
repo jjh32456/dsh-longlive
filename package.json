@@ -1,6 +1,6 @@
 {
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.0",
+  "version": "1.8.3",
   "type": "module",
   "description": "久视（longlive）：一个磁盘上的共享大脑，让每个会话都是同一个你——记忆卡、状态卡、开机卡让新会话接上同一段关系与未完成的事；配套会话卫生（热截断/备份/D2/D6 裁剪）与记忆工具（巩固/召回/程序性记忆）。1.6.8 在 1.6.7 之上并入共享大脑活动流（sharedBrain.activity：事件级活动写入、判重/蒸馏、只带新增的增量注入，默认关闭）与共享板状态诚实性修复（running 计数、焦点新鲜度、turn 状态、开机卡时效）；热截断与 1.6.7 相同。",
   "keywords": [
@@ -55,10 +55,12 @@
   },
   "files": [
     "CHANGELOG.md",
+    "src/*.js",
     "src/**/*.js",
+    "src/ui/*.js",
     "src/**/*.mjs",
     "src/**/*.json",
-    
+    "!src/router/policies/owner-rulings-*.json",
     "!src/router/fixtures/**",
     "lib/client.js",
     "cordis.patch.yml",
@@ -66,7 +68,11 @@
     "icon.svg",
     "README.md",
     "README.en.md",
+    "test/p1_probe.mjs",
     "LICENSE",
+    "docs/A1-MIGRATION.md",
+    "docs/INDEX-FRESHNESS.md",
+    "docs/RAW-INDEX-POLICY.md",
     "SPEC.md",
     "runbook.md",
     "QUICKSTART.md",
@@ -89,15 +95,23 @@
     "docs/SESSION-WATCH.md",
     "docs/TOOLS.md",
     "docs/TROUBLESHOOTING.md",
+    "!README.md.bak-*",
+    "!runbook.md.bak-*",
     "!**/*.bak-*",
     "!src/router/gen-design-headings.mjs",
+    "scripts/pack.mjs",
     "scripts/longlive-doctor.mjs",
     "scripts/truncate-cli.mjs",
     "scripts/recall-index-build.mjs",
+    "scripts/index-status.mjs",
+    "scripts/index-maintain.mjs",
+    "scripts/index-reconcile.mjs",
+    "scripts/rescore-cards.mjs",
     "scripts/metrics-read.mjs",
     "scripts/metrics-sample.mjs",
     "scripts/migrate-180.mjs",
     "scripts/backfill-auto-cards.mjs",
+    "scripts/migrate-a1-legacy.mjs",
     "scripts/verify-card-anchors.mjs",
     "scripts/surgery-inspect.mjs",
     "scripts/auto-truncate-run.ps1",
@@ -118,6 +132,12 @@
     "scripts/unattended-surgery.ps1",
     "docs/ERRORS.md"
   ],
+  "scripts": {
+    "test": "node scripts/lint-plugin-independence.mjs && node test/run-rc.mjs",
+    "test:080": "node test/run.mjs",
+    "pack": "node scripts/pack.mjs",
+    "lint:independence": "node scripts/lint-plugin-independence.mjs"
+  },
   "dependencies": {},
   "optionalDependencies": {
     "onnxruntime-node": "~1.16.3"
@@ -131,11 +151,5 @@
     "@kenz1117/dsh-engram": {
       "optional": true
     }
-  },
-  "scripts": {
-    "test": "node scripts/lint-plugin-independence.mjs && node test/run-rc.mjs",
-    "test:080": "node test/run.mjs",
-    "pack": "node scripts/pack.mjs",
-    "lint:independence": "node scripts/lint-plugin-independence.mjs"
   }
 }

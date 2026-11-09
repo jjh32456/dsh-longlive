@@ -49,6 +49,7 @@ import { apply as applyAutoRecall } from './recall/index.js';
 import { startPrestepPhase } from './metrics/prestep-latency.mjs';
 import { createBus, normalizeSessionId, shouldAckOnTurnEnd } from './bus/bus.mjs';
 import { createMaintenanceScheduler } from './memory/maintenance.js';
+import { registerRetention, retentionHealth } from './retention/index.js';
 import { normalizeActivityConfig, registerActivityStream } from './activity/index.js';
 import { registerRole } from './role/index.js';
 import {
@@ -150,7 +151,7 @@ export function resolveCardPath(rawPath, memoryRoot) {
     ? path.resolve(raw.replaceAll('<memoryRoot>', root))
     : path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root ?? process.cwd(), raw);
   if (!root) return resolved;
-  // 评审 M2：`../`、根外绝对路径、盘符跳转一律 E_PATH_OUTSIDE_ROOT。
+  // 复核 M2：`../`、根外绝对路径、盘符跳转一律 E_PATH_OUTSIDE_ROOT。
   // 只做词法判定、不读盘：越界路径在读任何文件之前就被拒绝。
   if (!isInsideRoot(root, resolved)) {
     throw memoryError(
@@ -729,7 +730,12 @@ export function registerFeatures(ctx, config = {}, options = {}) {
       try {
         const scheduler = createMaintenanceScheduler({
           memoryRoot,
-          config: cfg.autoMaintenance,
+          config: {
+            ...cfg.autoMaintenance,
+            // Host-injected session root; never derive it from an implicit
+            // memory root or the current machine's home.
+            sessionsRoot: options.sessionsRoot ?? null,
+          },
           // Test seam only (CONFIG.md lists `now` as internal); never a
           // deployment-facing setting.
           now: config.now,
@@ -751,6 +757,42 @@ export function registerFeatures(ctx, config = {}, options = {}) {
         }
       } catch (error) {
         warn(`[longlive] autoMaintenance 启动失败（${error?.code ?? error?.message ?? error}）— 已跳过`);
+      }
+    }
+  }
+
+  // Startup health check is independent of whether the janitor is enabled:
+  // the panel can read the returned/status object, and an over-budget
+  // .longlive produces one visible warning instead of silently growing.
+  if (memoryRoot && config?.retention && typeof config.retention === 'object') {
+    try {
+      const health = retentionHealth(memoryRoot, config.retention);
+      if (health.state !== 'ok') {
+        warn(`[longlive] retention health=${health.state}: .longlive ${health.totalBytes}/${health.budgetBytes} bytes`);
+      }
+    } catch (error) {
+      warn(`[longlive] retention health check failed（${error?.code ?? error?.message ?? error}）`);
+    }
+  }
+
+  // Unified retention (S5): off by default; even when enabled, dryRun defaults
+  // true. It gets its own timer so the existing autoMaintenance contract and
+  // tests (one timer when consolidation/forget are on) stay unchanged.
+  if (config?.retention?.enabled === true) {
+    if (!memoryRoot) {
+      warn('[longlive] retention 已开启但没有可解析的 memoryRoot — 已跳过');
+    } else {
+      try {
+        const retentionJob = registerRetention(ctx, {
+          memoryRoot,
+          config: config.retention,
+          now: config.now,
+          timers: config.timers,
+          warn,
+        });
+        if (retentionJob.enabled) enabled.push('retention');
+      } catch (error) {
+        warn(`[longlive] retention 启动失败（${error?.code ?? error?.message ?? error}）— 已跳过`);
       }
     }
   }

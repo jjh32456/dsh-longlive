@@ -1,6 +1,6 @@
-# OPERATIONS.md — 日常运维手册（1.8.0）
+# OPERATIONS.md — 日常运维手册（1.8.3）
 
-对象：愿意动手、会看日志，但没参与开发的人。所有结论都能在 1.8.0 源码里指到位置；
+对象：愿意动手、会看日志，但没参与开发的人。所有结论都能在 1.8.3 源码里指到位置；
 标「待核实」的是我在本机没有证据的推断。
 
 ---
@@ -27,6 +27,8 @@
 | 路径（相对 `memoryRoot`，默认 `~/.dsh/longlive-memory`） | 谁写 | 看什么 |
 |---|---|---|
 | `.longlive/logs/auto-truncate.log` | 插件 | **只有超过阈值的评估**才写一行 JSON：估算、阈值、动作。低于阈值/冷却/关闭等是静默的（见 §1.3） |
+| `.longlive/hot-truncate-diag.jsonl` | `session_truncate_visible` / `truncate-cli.mjs` | 1.8.3-rc.7 起每次非 dryrun 归档一行：session/turn/计划切点/retainTurns/tokens/字节/结果 `ok\|degraded\|fail`/`failReason`/耗时；按大小与日期轮转 |
+| `.longlive/auto-truncate-status.json` | 插件 | 1.8.3-rc.7 起的状态快照：`mode`（dryrun 显式）、`over.count`/`over.maxTokens`、`counters.error`/`counters.infeasible`、`lastError`/`lastInfeasible`；同时镜像到 `.longlive/status.json` 的 `autoTruncate` 字段，`/api/longlive/status` 可读 |
 | `.longlive/logs/auto-truncate.request.json` | 插件（request 模式） | 待执行请求。存在 = 有活没干；长期存在 = runner 没跑或失败 |
 | `.longlive/logs/auto-truncate-run.log` | runner | 人读的执行流水：关闭、切、验证、重启、退出码 |
 | `.longlive/logs/auto-truncate.log` 里的 `RESULT` 行 | runner | 机器读的一次执行结果（成功/失败、before/after、备份路径） |
@@ -52,6 +54,10 @@ Get-Item "$M\.longlive\logs\auto-truncate.request.json" -ErrorAction SilentlyCon
 
 # 最近一次 runner 结果
 Get-Content "$M\.longlive\logs\auto-truncate-run.log" -Tail 20
+
+# 1.8.3-rc.7：最近 5 条归档诊断 / 当前自动截断状态
+Get-Content "$M\.longlive\hot-truncate-diag.jsonl" -Tail 5
+Get-Content "$M\.longlive\auto-truncate-status.json" -Raw
 ```
 
 ### 1.3 怎么读 `auto-truncate.log` 的一行
@@ -238,7 +244,7 @@ Copy-Item -LiteralPath $BAK -Destination $S -Force
 
 ### 6.1 升级
 
-1. 校验 tgz：大小、sha256、`package.json` 里的版本号（本版 = `1.8.0`）。
+1. 校验 tgz：大小、sha256、`package.json` 里的版本号（本版 = `1.8.3`）。
 2. 停应用（不是"关窗口"，确认进程没了）。
 3. `dsh plugin --profile desktop add "file:<tgz 绝对路径>"`；不要同时跑第二条安装命令。
 4. 启动**两次**；第二次仍无 `1 entry did not activate` 才算激活。

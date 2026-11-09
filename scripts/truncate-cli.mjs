@@ -30,6 +30,7 @@ import path from 'node:path';
 import { VISIBLE_CONFIRM_WORD, truncateVisibleSession } from '../src/truncate-visible.js';
 import { detectLiveTarget, LIVE_TARGET_CODES } from '../src/live-target.js';
 import { dshHome } from '../src/home.js';
+import { hotTruncateDiagOptions } from '../src/hot-truncate-diag.js';
 
 const DEFAULT_KEEP_TURNS = 12;
 const DEFAULT_KEEP_TOKENS = 80_000;
@@ -146,6 +147,7 @@ function failure(error, sessionPath) {
     restored: result?.restored ?? null,
     before: result?.before ?? null,
     after: result?.after ?? null,
+    limit: result?.limit ?? null,
   };
 }
 
@@ -238,6 +240,10 @@ function main() {
       firstUserCapChars: options.firstUserCapChars,
       boundaryRetries: options.boundaryRetries,
       recentWriteWindowMs: 0,
+      // The orchestrator passes --memory-root; without it the CLI still cuts,
+      // but cannot write the durable per-archive diagnostic (returns diag:null).
+      memoryRoot: options.memoryRoot,
+      diagOptions: hotTruncateDiagOptions({}),
     });
     const after = result.after ?? result.before;
     const verify = result.needed

@@ -22,6 +22,7 @@
 // suite imports src/index.js from a shallow copy with no node_modules.
 
 import { createRequire } from 'node:module';
+import { FOLD_TRIGGER_TOKENS, TRUNCATE_INPUT_HARD_CAP_NORMAL_TOKENS, TRUNCATE_INPUT_HARD_CAP_LONG_TOKENS, TRUNCATE_OUTPUT_MAX_TOKENS, TRUNCATE_SAFETY_TOKENS, TRUNCATE_RESERVE_NORMAL_TOKENS, TRUNCATE_RESERVE_LONG_TOKENS } from './policy/threshold-policy.js';
 
 let z = null;
 try {
@@ -49,7 +50,7 @@ const ZH = {
   strictMemoryRoot: '未配置 memoryRoot 时直接报错，而不是回落到推导出的默认目录。',
   filterEnabled: '记忆准入过滤器：启动后异步分析 journal 与卡片（只读，默认开启）。',
   shadowEnabled: '旧配置兼容位：默认路由判定已关闭；要开启请显式设 routerRuntime=shadow 或 on。',
-  autoConclusion: '结论回流：每轮结束时把命中触发规则的结论写入 topics/（默认开启；显式 false 关闭）。',
+  autoConclusion: '结论候选池：只从 user 消息中的决定触发写 .longlive/index/conclusion-drafts.jsonl（默认开启；true=候选池模式，false=全关；assistant 不参与判定）。',
   surgeryRecovery: '启动时检查无人值守手术的恢复报告（默认开启）。',
   recoverOnStart: '启动时收尾或回滚未完成的可见截断事务（默认开启）。',
   keepEvents: 'session_truncate 默认保留的事件数（默认 20000）。',
@@ -117,6 +118,19 @@ const ZH = {
     },
     thinkingInjection: '开启 thinking 摘要注入（默认开启；显式 false 关闭；需 sharedBrain.activity.enabled=true。开启后把其他会话 assistant 可见 reasoning 的首句/≤200 字符摘要注入，单次最多 5 行）。',
   },
+  // S1（rc.7 整合线）新增段：审计与工具输出落盘的 scrub/TTL 元数据。
+  // 只新增独立块，不改任何既有配置块的语义与默认值。
+  audit: {
+    $description: '审计落盘治理（S1）：answer-audit 写入前的凭据类 scrub 与 TTL 元数据；删除执行归 S5 retention，本层只标注。',
+    redact: '开启 answer-audit 写入前凭据 scrub（默认开启；显式 false 关闭；命中只影响落盘文本，不影响审计判定）。',
+    retentionDays: 'answer-audit 行的保留天数元数据（默认 30；只写 retainUntil 元数据，不做删除）。',
+    cleanStaleLocks: '启动/doctor 清理陈旧锁（默认开启；只删超过阈值的 *.lock / *.lock.tmp-*）。',
+  },
+  toolOutput: {
+    $description: 'D2 工具输出归档治理（S1）：写入前凭据 scrub 与 TTL 元数据；删除执行归 S5 retention，本层只标注。',
+    redact: '开启 D2 tool-output 归档写入前凭据 scrub（默认开启；显式 false 关闭；sidecar 记录原文 sha256/长度/命中类型）。',
+    retentionDays: 'tool-output 归档的保留天数元数据（默认 90；只写 sidecar retainUntil，不做删除）。',
+  },
   memoryV2: {
     $description: '记忆/回忆/遗忘 v2 面板接口（M2-F 只读面 + M2-G 动作面）：1.8.0 默认开启，显式 false 为独立 kill switch（关闭时行为=1.6.8）。',
     enabled: '开启面板 API（27 条只读路由 + 18 动作 + HMAC 审计；1.8.0 默认开启，false=kill switch）。',
@@ -146,6 +160,45 @@ const ZH = {
       conflictPolicy: '证据冲突时的策略：degrade（默认降级）/ abstain（弃答）。',
     },
   },
+  retention: {
+    $description: '统一保留策略（默认关闭；打开后仍默认 dryRun，只有显式 dryRun:false 才删除）：hot-truncate 按容量+天数、tool-output 按 TTL+天数+容量、index 构建产物保留最近 N 份、handoff 按天数/容量、备份历史按天/份数。',
+    enabled: '开启维护 job 的统一 retention（默认关闭；显式 true 才注册调度）。',
+    dryRun: '只打印/返回计划，不删除（默认 true；设为 false 才允许删除）。',
+    intervalMs: '维护 job 间隔毫秒（默认 86400000，范围 60000–604800000）。',
+    runOnStart: '启动时先跑一次 plan（默认 true）。',
+    hotTruncate: {
+      $description: '热截断历史层：按容量与天数清理；删除前必须校验对应卡/锚点已覆盖，未覆盖则推迟并告警。',
+      maxBytes: '容量上限字节数（默认 2147483648，即 2 GiB）。',
+      maxAgeDays: '最长保留天数（默认 14）。',
+      requireCoverage: '删除前要求卡/锚点已覆盖（默认 true；关闭只在明确风险下使用）。',
+    },
+    toolOutput: {
+      $description: '工具输出层：按天数（可配合每轮 meta.json 的 ttlDays/expiresAt）与总容量清理。',
+      maxBytes: '容量上限字节数（默认 2147483648，即 2 GiB）。',
+      maxAgeDays: '默认最长保留天数（默认 90）。',
+    },
+    indexArtifacts: {
+      $description: '.longlive/index 的 verify/build JSON 构建产物：只保留最近 N 份，绝不删 cards/events 等主文件。',
+      keep: '保留最近 N 份（默认 5，范围 1–1000）。',
+    },
+    handoff: {
+      $description: 'handoff 交付材料：按天数（默认 180）或容量清理；删除前先写归档清单，release 证据标记。',
+      maxBytes: '容量上限字节数（默认 2147483648，即 2 GiB）。',
+      maxAgeDays: '最长保留天数（默认 180）。',
+    },
+    backup: {
+      $description: '备份历史：会话备份目录按天保留，profile 快照保留最近 N 份；不碰一次性 memory 快照。',
+      sessionsRoot: '会话备份根（默认空：未配置时该层不执行；部署时用宿主注入的备份根）。',
+      sessionsDays: '会话备份保留天数（默认 14）。',
+      profileRoot: 'profile 快照根（默认空：未配置时该层不执行；部署时用宿主注入的快照根）。',
+      profileKeep: 'profile 快照保留份数（默认 7）。',
+    },
+    health: {
+      $description: '启动健康检查：.longlive 总量 vs 预算。',
+      budgetBytes: '.longlive 预算字节数（默认 8 GiB）。',
+      warnRatio: 'warn 阈值比例（默认 0.85，范围 0–1）。',
+    },
+  },
   autoMaintenance: {
     $description: '每日维护：本地午夜调度 consolidate 报告与 forget 候选清单。',
     enabled: '开启每日维护（默认开启；显式 false 关闭）。',
@@ -169,7 +222,7 @@ const ZH = {
     $description: '自动可见截断：在 turn/end 规划 log / dryrun / request（默认开启，mode=dryrun；显式 false 关闭）。',
     enabled: '开启自动可见截断（默认开启；显式 false 关闭；开启后仍默认只 dryrun，不写会话）。',
     mode: '模式：log / dryrun / request（旧值 apply 会被改写为 request）。',
-    tokensThreshold: '触发截断的估算 token 阈值（默认 300000）。',
+    tokensThreshold: '触发截断的估算 token 阈值（1.8.3 策略线默认 350000；非 API 强制）。',
     minTurns: '触发截断的最小轮数（默认 12，严格大于）。',
     cooldownMinutes: '每会话冷却分钟数（默认 60）。',
     keepTurns: '至少保留的轮数（默认 12）。',
@@ -178,13 +231,15 @@ const ZH = {
     boundaryRetries: '边界不稳定时的重试次数（默认 3）。',
     appExe: 'runner 关闭/重启的应用路径；留空使用当前进程 exe。',
     profile: '写入 request 的 profile 标签（默认 desktop；runner 不传该参数）。',
+    // logMaxBytes / logMaxAgeDays / logMaxFiles / logRotateDaily are passthrough
+    // keys (not schema leaves) because the settings schema node count is locked.
   },
   hotTruncate: {
     $description: '热截断（compaction-hot-truncate 行）：只切已完成且早于保留窗口的整轮，不调 LLM。',
     mode: '模式：off / cut / auto（默认 cut）；cut 在宿主每步按阈值检查，auto 再加空闲时自动切。',
     retainTurns: '切完保留最近 4 轮完成对话（默认 4）。',
     retainTokens: '保留窗口的估算 token 下限（默认 8000）。',
-    autoMinTokens: '自动切达到该估算 token 数才剪（默认 300000；手动 /compact 与溢出恢复不受此限）；每次切刀都会让前缀缓存失效，下一轮全价重算。',
+    autoMinTokens: '自动切达到该估算 token 数才剪（1.8.3 策略线默认 350000；手动 /compact 与溢出恢复不受此限）；每次切刀都会让前缀缓存失效，下一轮全价重算。',
   },
 };
 
@@ -196,7 +251,7 @@ const EN = {
   strictMemoryRoot: 'Fail when memoryRoot is unset instead of falling back to the derived directory.',
   filterEnabled: 'Memory-admission filter: analyses the journal and cards asynchronously at startup (read-only; on by default).',
   shadowEnabled: 'Legacy compatibility: router evaluation is off by default; set routerRuntime=shadow or on to opt in.',
-  autoConclusion: 'Conclusion write-back: writes trigger-matched conclusions into topics/ at turn end (on by default; explicitly false opts out).',
+  autoConclusion: 'Conclusion candidate pool: writes only user-authored decision triggers to .longlive/index/conclusion-drafts.jsonl (on by default; true=candidate-pool mode, false=fully off; assistant text never triggers).',
   surgeryRecovery: 'Check the unattended-surgery recovery report at startup (on by default).',
   recoverOnStart: 'Finish or roll back an interrupted visible-truncation transaction at startup (on by default).',
   keepEvents: 'Default events kept by session_truncate (20000).',
@@ -264,6 +319,18 @@ const EN = {
     },
     thinkingInjection: 'Inject thinking summaries (on by default; explicitly false opts out; requires sharedBrain.activity.enabled=true). Summaries are the first sentence or ≤200 chars of other sessions\' visible reasoning, max 5 lines per injection.',
   },
+  // S1 (rc.7 integration line): new blocks only; no existing block is modified.
+  audit: {
+    $description: 'Audit write governance (S1): credential scrub before answer-audit writes plus TTL metadata; deletion belongs to S5 retention, this layer only annotates.',
+    redact: 'Credential scrub before writing answer-audit rows (ON by default; explicitly false opts out; only affects persisted text, never the audit verdict).',
+    retentionDays: 'Retention metadata for answer-audit rows (default 30; writes retainUntil only, never deletes).',
+    cleanStaleLocks: 'Clean stale locks on startup/doctor (ON by default; only *.lock / *.lock.tmp-* older than the threshold).',
+  },
+  toolOutput: {
+    $description: 'D2 tool-output archive governance (S1): credential scrub before writes plus TTL metadata; deletion belongs to S5 retention, this layer only annotates.',
+    redact: 'Credential scrub before archiving D2 tool output (ON by default; explicitly false opts out; the sidecar records the original sha256/length/hit types).',
+    retentionDays: 'Retention metadata for D2 tool-output archives (default 90; sidecar retainUntil only, never deletes).',
+  },
   memoryV2: {
     $description: 'Memory/recall/forget v2 panel API (M2-F read-only face + M2-G action face): ON by default in 1.8.0; explicit false is an independent kill switch (behaviour = 1.6.8 when killed).',
     enabled: 'Enable the panel API (27 read-only routes + 18 actions + HMAC audit; ON by default, false = kill switch).',
@@ -293,6 +360,45 @@ const EN = {
       conflictPolicy: 'Policy on evidence conflicts: degrade (default) or abstain.',
     },
   },
+  retention: {
+    $description: 'Unified retention policy (off by default; even when on, dryRun stays on until explicitly disabled): hot-truncate by capacity+age, tool-output by TTL+age+capacity, index build artifacts keep newest N, handoff by age/capacity, backup history by age/count.',
+    enabled: 'Enable the unified retention maintenance job (off by default; explicitly true registers the scheduler).',
+    dryRun: 'Plan only, never delete (default true; set false to allow deletion).',
+    intervalMs: 'Maintenance interval in ms (default 86400000, range 60000-604800000).',
+    runOnStart: 'Run one plan at startup (default true).',
+    hotTruncate: {
+      $description: 'Hot-truncate history: capacity and age limits; a file is deleted only after its cut turns are covered by a card or anchor; uncovered files are postponed with a warning.',
+      maxBytes: 'Capacity limit in bytes (default 2147483648, 2 GiB).',
+      maxAgeDays: 'Maximum age in days (default 14).',
+      requireCoverage: 'Require card/anchor coverage before deletion (default true; disable only with explicit risk acceptance).',
+    },
+    toolOutput: {
+      $description: 'Tool-output layer: age (optionally per-turn meta.json ttlDays/expiresAt) plus total capacity.',
+      maxBytes: 'Capacity limit in bytes (default 2147483648, 2 GiB).',
+      maxAgeDays: 'Default maximum age in days (default 90).',
+    },
+    indexArtifacts: {
+      $description: 'verify/build JSON artifacts under .longlive/index: keep newest N; never delete cards/events or other main files.',
+      keep: 'Keep newest N artifacts (default 5, range 1-1000).',
+    },
+    handoff: {
+      $description: 'Handoff materials: age (default 180 days) or capacity; an archive manifest is written before deletion and release evidence is marked.',
+      maxBytes: 'Capacity limit in bytes (default 2147483648, 2 GiB).',
+      maxAgeDays: 'Maximum age in days (default 180).',
+    },
+    backup: {
+      $description: 'Backup history: keep session backup dirs by day and the newest N profile snapshots; one-off memory snapshots are never touched.',
+      sessionsRoot: 'Session backup root (empty by default: layer disabled until the host injects one).',
+      sessionsDays: 'Session backup retention days (default 14).',
+      profileRoot: 'Profile snapshot root (empty by default: layer disabled until the host injects one).',
+      profileKeep: 'Profile snapshots to keep (default 7).',
+    },
+    health: {
+      $description: 'Startup health check: .longlive total size vs. budget.',
+      budgetBytes: '.longlive budget in bytes (default 8 GiB).',
+      warnRatio: 'Warn threshold ratio (default 0.85, range 0-1).',
+    },
+  },
   autoMaintenance: {
     $description: 'Daily maintenance: schedule consolidate reports and forget candidates at local midnight.',
     enabled: 'Enable daily maintenance (on by default; explicitly false opts out).',
@@ -316,7 +422,7 @@ const EN = {
     $description: 'Automatic visible truncation: plan log / dryrun / request at turn end (off by default in 1.6.0, mode=dryrun).',
     enabled: 'Enable automatic visible truncation (on by default; explicitly false opts out; even when enabled it only dry-runs unless you change mode).',
     mode: 'Mode: log / dryrun / request (the legacy value apply is rewritten to request).',
-    tokensThreshold: 'Estimated-token threshold that triggers truncation (default 300000).',
+    tokensThreshold: 'Estimated-token threshold that triggers truncation (1.8.3 policy default 350000; not API-enforced).',
     minTurns: 'Minimum turns before truncation may trigger (default 12, strictly greater).',
     cooldownMinutes: 'Per-session cooldown in minutes (default 60).',
     keepTurns: 'Minimum turns kept (default 12).',
@@ -331,7 +437,7 @@ const EN = {
     mode: 'Mode: off / cut / auto (cut by default); cut is checked each step, auto also cuts at idle.',
     retainTurns: 'Keep the last 4 completed turns after a cut (default 4).',
     retainTokens: 'Minimum estimated tokens kept in the retention window (default 8000).',
-    autoMinTokens: 'Automatic cuts happen only once the estimated token count reaches this value (default 300000; manual /compact and overflow recovery ignore it); every cut invalidates the prefix cache, so the next turn re-bills at full price.',
+    autoMinTokens: 'Automatic cuts happen only once the estimated token count reaches this value (1.8.3 policy default 350000; manual /compact and overflow recovery ignore it); every cut invalidates the prefix cache, so the next turn re-bills at full price.',
   },
 };
 
@@ -411,7 +517,7 @@ function schemaOf() {
   const autoTruncate = z.object({
     enabled: z.boolean().default(true).description(ZH.autoTruncate.enabled),
     mode: z.string().default('dryrun').description(ZH.autoTruncate.mode),
-    tokensThreshold: z.number().default(300000).description(ZH.autoTruncate.tokensThreshold),
+    tokensThreshold: z.number().default(350000).description(ZH.autoTruncate.tokensThreshold),
     minTurns: z.number().default(12).description(ZH.autoTruncate.minTurns),
     cooldownMinutes: z.number().default(60).description(ZH.autoTruncate.cooldownMinutes),
     keepTurns: z.number().default(12).description(ZH.autoTruncate.keepTurns),
@@ -420,6 +526,10 @@ function schemaOf() {
     boundaryRetries: z.number().default(3).description(ZH.autoTruncate.boundaryRetries),
     appExe: z.string().default('').description(ZH.autoTruncate.appExe),
     profile: z.string().default('desktop').description(ZH.autoTruncate.profile),
+    // Log rotation knobs intentionally stay as passthrough keys rather than
+    // schema leaves: the settings schema is snapshot-locked (113 nodes), while
+    // normalizeAutoTruncateConfig() reads and validates these keys when present.
+    // Defaults live in AUTO_TRUNCATE_DEFAULTS and are documented in docs/CONFIG.md.
   }).collapse();
 
   // Hot truncate lives on the separate `compaction-hot-truncate` row, but the
@@ -430,7 +540,20 @@ function schemaOf() {
     mode: z.string().default('cut').description(ZH.hotTruncate.mode),
     retainTurns: z.number().default(4).description(ZH.hotTruncate.retainTurns),
     retainTokens: z.number().default(8000).description(ZH.hotTruncate.retainTokens),
-    autoMinTokens: z.number().default(300000).description(ZH.hotTruncate.autoMinTokens),
+    autoMinTokens: z.number().default(350000).description(ZH.hotTruncate.autoMinTokens),
+  }).collapse();
+
+  // 1.8.3 fold/truncate are separate concepts and separate config namespaces.
+  const fold = z.object({
+    triggerTokens: z.number().default(FOLD_TRIGGER_TOKENS).description('折叠策略线（token）：达到即请求宿主 compaction；插件不能 pre-step 强制本轮折叠。默认 350000。'),
+  }).collapse();
+  const truncate = z.object({
+    inputHardCapNormal: z.number().default(TRUNCATE_INPUT_HARD_CAP_NORMAL_TOKENS).description('输入硬截断触发线（正常输出预留）：input+reserve+safety >= 1M，等号算超；默认 757000。'),
+    inputHardCapLongOutput: z.number().default(TRUNCATE_INPUT_HARD_CAP_LONG_TOKENS).description('输入硬截断触发线（长输出预留）：默认 599000。'),
+    outputMaxTokens: z.number().default(TRUNCATE_OUTPUT_MAX_TOKENS).description('输出策略上限/告警值（宿主不可配，不是 API 强制）：默认 350000。'),
+    safetyTokens: z.number().default(TRUNCATE_SAFETY_TOKENS).description('共享窗口 safety 预留：默认 50000。'),
+    reserveNormal: z.number().default(TRUNCATE_RESERVE_NORMAL_TOKENS).description('正常输出 reserve：默认 192000。'),
+    reserveLongOutput: z.number().default(TRUNCATE_RESERVE_LONG_TOKENS).description('长输出 reserve：默认 350000；input>=350K 默认取此档。'),
   }).collapse();
 
   const answerGuardGate = z.object({
@@ -456,6 +579,52 @@ function schemaOf() {
     gate: answerGuardGate,
   }).collapse();
 
+  // S1（rc.7 整合线）新增段位：audit / toolOutput 独立配置块。
+  // 只新增字段，不改任何既有块；删除执行归 S5 retention，这里只写 TTL 元数据。
+  const audit = z.object({
+    redact: z.boolean().default(true).description(ZH.audit.redact),
+    retentionDays: z.number().default(30).description(ZH.audit.retentionDays),
+    cleanStaleLocks: z.boolean().default(true).description(ZH.audit.cleanStaleLocks),
+  }).collapse();
+
+  const toolOutput = z.object({
+    redact: z.boolean().default(true).description(ZH.toolOutput.redact),
+    retentionDays: z.number().default(90).description(ZH.toolOutput.retentionDays),
+  }).collapse();
+
+  const retention = z.object({
+    enabled: z.boolean().default(false).description(ZH.retention.enabled),
+    dryRun: z.boolean().default(true).description(ZH.retention.dryRun),
+    intervalMs: z.number().default(86400000).description(ZH.retention.intervalMs),
+    runOnStart: z.boolean().default(true).description(ZH.retention.runOnStart),
+    hotTruncate: z.object({
+      maxBytes: z.number().default(2147483648).description(ZH.retention.hotTruncate.maxBytes),
+      maxAgeDays: z.number().default(14).description(ZH.retention.hotTruncate.maxAgeDays),
+      requireCoverage: z.boolean().default(true).description(ZH.retention.hotTruncate.requireCoverage),
+    }).collapse(),
+    toolOutput: z.object({
+      maxBytes: z.number().default(2147483648).description(ZH.retention.toolOutput.maxBytes),
+      maxAgeDays: z.number().default(90).description(ZH.retention.toolOutput.maxAgeDays),
+    }).collapse(),
+    indexArtifacts: z.object({
+      keep: z.number().default(5).description(ZH.retention.indexArtifacts.keep),
+    }).collapse(),
+    handoff: z.object({
+      maxBytes: z.number().default(2147483648).description(ZH.retention.handoff.maxBytes),
+      maxAgeDays: z.number().default(180).description(ZH.retention.handoff.maxAgeDays),
+    }).collapse(),
+    backup: z.object({
+      sessionsRoot: z.string().default('').description(ZH.retention.backup.sessionsRoot),
+      sessionsDays: z.number().default(14).description(ZH.retention.backup.sessionsDays),
+      profileRoot: z.string().default('').description(ZH.retention.backup.profileRoot),
+      profileKeep: z.number().default(7).description(ZH.retention.backup.profileKeep),
+    }).collapse(),
+    health: z.object({
+      budgetBytes: z.number().default(8589934592).description(ZH.retention.health.budgetBytes),
+      warnRatio: z.number().default(0.85).description(ZH.retention.health.warnRatio),
+    }).collapse(),
+  }).collapse();
+
   return z.object({
     memoryRoot: z.string().description(ZH.memoryRoot).disabled(),
     memRoot: z.string().description(ZH.memRoot).disabled(),
@@ -463,6 +632,12 @@ function schemaOf() {
     filterEnabled: z.boolean().default(true).description(ZH.filterEnabled),
     shadowEnabled: z.boolean().default(true).description(ZH.shadowEnabled),
     autoConclusion: z.boolean().default(true).description(ZH.autoConclusion),
+  conclusionDraft: z.object({
+    ttlDays: z.number().default(30).description('A1 候选池未蒸馏过期天数（默认 30；过期移入 .longlive/archive/conclusion-drafts/，不删）。'),
+  }).description('A1 结论候选池：原料先落盘，蒸馏后才可进召回面。'),
+  conclusionDistill: z.object({
+    enabled: z.boolean().default(true).description('维护周期是否把 pending A1 候选蒸馏进 topics/（默认开启）。'),
+  }).description('A1 候选蒸馏开关；enabled=false 时 A1 仍写候选池，只是不蒸馏。'),
     surgeryRecovery: z.boolean().default(true).description(ZH.surgeryRecovery),
     recoverOnStart: z.boolean().default(true).description(ZH.recoverOnStart),
     keepEvents: z.number().default(20000).description(ZH.keepEvents),
@@ -494,6 +669,8 @@ function schemaOf() {
 
     d2,
     d6,
+    audit,
+    toolOutput,
     autoRecall,
     identityCard,
     presenceBus,
@@ -502,6 +679,7 @@ function schemaOf() {
     role,
     answerGuard,
     autoMaintenance,
+    retention,
     routerFace,
     autoTruncate,
     hotTruncate,

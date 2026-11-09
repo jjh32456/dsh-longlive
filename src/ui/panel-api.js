@@ -1,11 +1,11 @@
 // src/ui/panel-api.js — M2-F/M2-G 装配层（宿主接线 + HTTP 分派）
 //
 // 把权限门（panel-auth）、完整性（panel-integrity）、审计链（actions/audit）、
-// evidence 写路径（actions/evidence）、动作面（ui/actions）与 16 条只读路由
+// evidence 写路径（actions/evidence）、动作面（ui/actions）与 22 条只读路由
 // （ui/routes-readonly）装配成一个可测试的门面：
 //   - createPanelApi(options) 纯内存/文件装配，契约测试直接驱动；
 //   - registerPanelApiRoutes(ctx, options) 通过 ctx.inject(['webServer']) 注册
-//     16 条只读路由 + 5 条动作路由（POST preview/apply/undo、GET actions/audit）
+//     22 条只读路由 + 5 条动作路由 = 27 路由（POST preview/apply/undo、GET actions/audit 等）
 //     + G3 distill 详情前缀路由。宿主没有 Web server 时注册失败只 warn，不阻塞加载。
 //
 // 开关：由 src/index.js 读 `memoryV2.enabled`（默认 false）决定是否调用本模块；

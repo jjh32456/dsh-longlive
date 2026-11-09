@@ -31,11 +31,12 @@ import {
   DEFAULT_KEEP_TURNS,
   DEFAULT_KEEP_TOKENS,
 } from './truncate-visible.js';
+import { hotTruncateDiagOptions } from './hot-truncate-diag.js';
 import { analyzeCompaction, describeCompaction } from './compaction.js';
 import { memoryIndex } from './memory/index.js';
 import { memoryConsolidate } from './memory/consolidate.js';
 import { memoryReinforce } from './memory/reinforce.js';
-import { memoryForget } from './memory/forget.js';
+import { memoryForget, forgetStatus } from './memory/forget.js';
 import { forgetV2 } from './memory/forget-v2.js';
 import { memoryRecall } from './memory/recall.js';
 import { recallV2 } from './memory/recall-v2.js';
@@ -762,6 +763,9 @@ export function truncateVisibleTool(args = {}, config = {}) {
   // Same split of authority as truncateTool: "I-KNOW-THIS-CORRUPTS" clears the
   // live guard only; the writer below still requires "TRUNCATE-VISIBLE".
   const writeConfirm = escapeConfirmed ? VISIBLE_CONFIRM_WORD : args.confirm;
+  const diagMemoryRoot = typeof config.memoryRoot === 'string' && config.memoryRoot.trim() !== ''
+    ? config.memoryRoot.trim()
+    : (typeof config.memRoot === 'string' && config.memRoot.trim() !== '' ? config.memRoot.trim() : null);
   let summary;
   try {
     summary = truncateVisibleSession(resolved.sessionPath, {
@@ -775,6 +779,9 @@ export function truncateVisibleTool(args = {}, config = {}) {
       insertArchiveCard: args.insertArchiveCard,
       recentWriteWindowMs: config.recentWriteWindowMs,
       faultAt: config.faultAt,
+      memoryRoot: diagMemoryRoot,
+      diagOptions: hotTruncateDiagOptions(config.autoTruncate ?? {}),
+      logger: config.logger,
     });
   } catch (error) {
     const detail = error?.result ?? {};
@@ -2007,6 +2014,7 @@ function memoryTool(name, fn) {
 
 /** Product path must use forgetV2 so hostkey gate + tombstone enrichment cannot be bypassed. */
 function memoryForgetTool(args, config) {
+  if (args.status === true) return forgetStatus(args, config);
   // Preserve the legacy invalid-confirm error (throws before any execution).
   if (args.confirm !== undefined && args.confirm !== 'FORGET') return memoryForget(args, config);
   return forgetV2({ ...args, mode: args.confirm === 'FORGET' ? 'execute' : 'propose' }, config);
@@ -2605,16 +2613,17 @@ export const TOOLS = [
   {
     name: 'memory_consolidate',
     description:
-      'Read journal/*.md entries dated after the last consolidation (or an explicit since) and produce a ' +
-      'proposal report: which paragraph belongs in which card, why, a 120-char excerpt, and a suggested salience. ' +
-      'Journal paragraphs may carry `<!-- affect: N | reason -->` (N 1..5); the marker wins over the regex ' +
-      'fallback, and malformed markers are listed under badAffect without failing the run. Every proposal gets a ' +
-      'stable id (sha1(source paragraph text)[:12]); ids already in state.seenProposals are never proposed again. ' +
-      'Report only — it never edits a card. It writes exactly one file under <memoryRoot>/.longlive/reports/ and ' +
-      'records new proposal ids in memory-state.json; lastConsolidated advances only after every proposal for the ' +
-      'newest scanned day is resolved (accepted/rejected/superseded). There is no apply flag by design.',
+      'Daily consolidation proposals plus resolution. Default action=report reads journal paragraphs after the ' +
+      'last consolidation (or an explicit since) and writes one proposal report; it never edits a card. ' +
+      'action:"accept" (with proposalId) writes a NEW card through the normal writeCard path and records the ' +
+      'resolution in memory-state.json; action:"reject" records the reason instead. Both advance lastConsolidated ' +
+      'over fully resolved days. action:"status" returns the pending backlog. Every proposal id is stable ' +
+      '(sha1(source paragraph)[:12]); ids already seen are never proposed twice. There is no apply flag.',
     parameters: {
       since: { type: 'string', description: 'Optional YYYY-MM-DD override for the incremental start; defaults to memory-state.json lastConsolidated.' },
+      action: { type: 'string', enum: ['report', 'accept', 'reject', 'status'], description: 'report (default) | accept | reject | status.' },
+      proposalId: { type: 'string', description: '12-char proposal id (required for accept/reject).' },
+      reason: { type: 'string', description: 'Operator reason (required for reject; recorded in state + audit).' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: (_a, value) => OUTPUT_TEXT(value) },
     invoke: memoryTool('memory_consolidate', memoryConsolidate),
@@ -2645,6 +2654,7 @@ export const TOOLS = [
       'deletes a file.',
     parameters: {
       confirm: { type: 'string', description: 'Default absent = dry-run. Pass "FORGET" to execute the proposals.' },
+      status: { type: 'boolean', description: 'true = read-only forget visibility: recorded dry/real runs, scaffold dirs, execution gate.' },
     },
     output: { schema: { type: 'object', additionalProperties: true }, render: (_a, value) => OUTPUT_TEXT(value) },
     invoke: memoryTool('memory_forget', memoryForgetTool),

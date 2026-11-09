@@ -54,6 +54,8 @@ import { checkSurgeryOnStart, receiptText } from './surgery-recovery.js';
 import { createAutoTruncator } from './auto-truncate.js';
 import { VERSION } from './version.js';
 import { memoryRootSetting, defaultMemoryRoot } from './memory/paths.js';
+import { configureAppendStore, flushAppendHealth } from './util/append-store.js';
+import { cleanupStaleLocks } from './util/stale-locks.js';
 import { checkHostCompatibility, declaredHostRange, detectHostVersion, warnOnce } from './host-version.js';
 import { recordEngineStatus } from './engine-status.js';
 import { configurePolicyProfile } from './policy-profile.js';
@@ -69,6 +71,7 @@ import { registerMetrics } from './metrics/index.mjs';
 import { registerToolOutputTrim } from './tool-output.js';
 import { registerD6 } from './d6/runtime.js';
 import { registerHostLifecycle } from './lifecycle/index.js';
+import { registerTurnCapture } from './memory/capture-host.js';
 import { registerPanelApiRoutes } from './ui/panel-api.js';
 import { registerUiRoutes } from './ui/routes.js';
 
@@ -170,6 +173,30 @@ export function apply(ctx, config = {}) {
 
   const memoryRoot = startupMemoryRoot(ctx, { ...config, home });
 
+  // S1（rc.7 整合线）：统一 append 层 + 陈旧锁清理。两件都是非致命：写不进去
+  // 只降级并告警，绝不让插件加载失败。
+  try {
+    configureAppendStore({ logger: { warn: (message) => warnOnce(ctx, message) }, now: config.now });
+  } catch (error) {
+    warnOnce(ctx, `append-store 初始化失败（${error?.message ?? error}）— 追加失败将只走 console.warn。`);
+  }
+  if (memoryRoot) {
+    try {
+      const lockReport = cleanupStaleLocks({
+        memoryRoot,
+        now: config.now,
+        logger: { warn: (message) => warnOnce(ctx, message) },
+        audit: config.audit?.cleanStaleLocks !== false,
+      });
+      if (lockReport.removed.length > 0) {
+        warnOnce(ctx, `清理陈旧锁 ${lockReport.removed.length} 个（${lockReport.removed.map((item) => item.file).slice(0, 3).join(', ')}…）`);
+      }
+      try { flushAppendHealth(memoryRoot, { now: config.now }); } catch { /* health snapshot is best effort */ }
+    } catch (error) {
+      warnOnce(ctx, `陈旧锁清理失败（${error?.message ?? error}）— 不影响加载。`);
+    }
+  }
+
   // C1 (1.4.0): persist the verdict for the panel. Data only — the panel may
   // render a red dot from `engineMismatch` and does not need host logs. A
   // matching host clears a stale record. A missing/read-only memoryRoot, a
@@ -197,7 +224,10 @@ export function apply(ctx, config = {}) {
     memoryRoot,
     home,
     autoTruncate: config.autoTruncate,
+    fold: config.fold,
+    truncate: config.truncate,
     now: config.now,
+    logger: ctx?.logger,
   });
 
   // R1 运行时适配器：1.6.0 安全默认改为 off（abuse assessment §4.1 / §4.5）。
@@ -462,7 +492,11 @@ export function apply(ctx, config = {}) {
   }
   // 0.9.0-rc.1 opt-in features. Every switch defaults to off, in which case
   // this call registers nothing, reads nothing and logs nothing.
-  const featuresResult = registerFeatures(ctx, config, { memoryRoot, surgeryReceipt });
+  const featuresResult = registerFeatures(ctx, config, {
+    memoryRoot,
+    surgeryReceipt,
+    sessionsRoot: path.join(home, 'sessions'),
+  });
 
   // 1.8.0 answer guard (ON by default): registers the outermost pre-step evidence
   // injection, the system-prompt rule section, the session/event audit listener and
@@ -496,7 +530,7 @@ export function apply(ctx, config = {}) {
   // missing memoryRoot simply disables the recorder.
   registerMetrics(ctx, config, { memoryRoot });
 
-  // D2 (opt-in, default off): trim oversized tool results at the host's
+  // D2 (default on; literal `d2.enabled:false` is the kill switch): trim oversized tool results at the host's
   // `tools/post-execute` waterfall and archive the full text under
   // `<memoryRoot>/.longlive/tool-output/<turn>/<id>.txt` — the same path D3's
   // session_original plans. Registration failure or a missing root is a
@@ -557,6 +591,28 @@ export function apply(ctx, config = {}) {
     } catch (error) {
       warnOnce(ctx, `宿主生命周期入账失败（${error?.message ?? error}）— 插件继续加载。`);
     }
+  }
+
+  // 1.8.1-fix（2026-11-09，复核复核后修订）：逐轮采集接线。1.8.1 final 的
+  // captureTurn 没有任何 turn/end 触发点，事件索引只靠脚本回填——真机实测
+  // 11-08 17:57 后无新增。这里补上，且**独立于 memoryV2 开关**（复核 P0-1：
+  // memoryV2 是面板 API 的 kill switch，不应控制采集）；异步、不阻塞宿主，
+  // 空记忆根会后台自举索引。失败只告警，不影响宿主。
+  try {
+    const captureHome = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME.trim() !== ''
+      ? path.resolve(process.env.DSH_HOME.trim())
+      : path.join(os.homedir(), '.dsh');
+    const captureWiring = registerTurnCapture(ctx, {
+      memoryRoot,
+      sessionRoots: [path.join(captureHome, 'sessions')],
+      warn: (message) => warnOnce(ctx, message),
+      now: config.now,
+    });
+    if (!captureWiring.ok) {
+      warnOnce(ctx, `逐轮采集接线不可用（${captureWiring.code}）— 事件索引将依赖回填脚本。`);
+    }
+  } catch (error) {
+    warnOnce(ctx, `逐轮采集接线失败（${error?.message ?? error}）— 插件继续加载。`);
   }
 
   lastFeatureActivation = featuresResult && Array.isArray(featuresResult.enabled) ? featuresResult.enabled : [];

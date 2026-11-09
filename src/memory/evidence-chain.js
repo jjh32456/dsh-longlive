@@ -8,7 +8,7 @@
 //   * 回滚 = 读旧版本、作为**新版本**再追加（不物理删）；旧版仍可读（回读接口按 version 取）。
 //   * 哈希链：line.hash = sha256(stableStringify(除 hash/sig 外字段))；prevLineHash 串前一行；
 //     sidecar `.head.json` 记 {version, headHash, count}（原子写）。
-//   * 宿主私有写保护（评审 P1）：写必须带宿主内存 auditKey，签名 = HMAC-SHA256(auditKey, hash)；
+//   * 宿主私有写保护（复核 P1）：写必须带宿主内存 auditKey，签名 = HMAC-SHA256(auditKey, hash)；
 //     无 key → E_NO_CAP；绕过 writer 直写/改行 → verifyChain 报 E_CHAIN_TAMPERED / E_HMAC_INVALID。
 //
 // 与 cards.js 的合并（避免两套真相）：conflict 判定复用 cards.isNegativeConclusion（见 conflicts.js），

@@ -39,6 +39,20 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { parseSession } from './codec.js';
+import { appendJsonlRotated, normalizeLogRotation } from './log-rotation.js';
+import { recordAutoTruncateStatus } from './auto-truncate-status.js';
+import {
+  CONTEXT_WINDOW_TOKENS,
+  INPUT_COMPACT_AT_TOKENS,
+  OUTPUT_RESERVE_NORMAL_TOKENS,
+  SAFETY_TOKENS,
+  THRESHOLD_POLICY_WARNING,
+  classifyFoldFailure,
+  evaluateFoldTrigger,
+  evaluateTruncateBudget,
+  foldRetrySchedule,
+  thresholdEnforceability,
+} from './policy/threshold-policy.js';
 import {
   DEFAULT_BOUNDARY_RETRIES,
   DEFAULT_FIRST_USER_CAP_CHARS,
@@ -57,7 +71,7 @@ import {
 export const AUTO_TRUNCATE_DEFAULTS = Object.freeze({
   enabled: true,
   mode: 'dryrun',
-  tokensThreshold: 300_000,
+  tokensThreshold: INPUT_COMPACT_AT_TOKENS,
   minTurns: 12,
   cooldownMinutes: 60,
   keepTurns: 12,
@@ -157,6 +171,22 @@ export function normalizeAutoTruncateConfig(raw) {
   asPositiveInt('keepTokens', merged.keepTokens, 1);
   asPositiveInt('firstUserCapChars', merged.firstUserCapChars, 1);
   asPositiveInt('boundaryRetries', merged.boundaryRetries, 0);
+  // 1.8.1-rc.7 diagnostics log rotation is an optional passthrough block. It is
+  // deliberately absent from AUTO_TRUNCATE_DEFAULTS so the settings schema node
+  // count stays stable; when present it is validated here, otherwise the shared
+  // log-rotation defaults (8 MiB / 14 days / 5 files / daily) apply.
+  if (merged.logMaxBytes !== undefined) asPositiveInt('logMaxBytes', merged.logMaxBytes, 64 * 1024);
+  if (merged.logMaxFiles !== undefined) asPositiveInt('logMaxFiles', merged.logMaxFiles, 1);
+  if (merged.logMaxAgeDays !== undefined) {
+    if (!Number.isInteger(merged.logMaxAgeDays) || merged.logMaxAgeDays < 0) {
+      throw autoError(AUTO_TRUNCATE_ERRORS.BAD_CONFIG,
+        `autoTruncate.logMaxAgeDays must be an integer >= 0 (got ${JSON.stringify(merged.logMaxAgeDays)})`);
+    }
+  }
+  if (merged.logRotateDaily !== undefined && typeof merged.logRotateDaily !== 'boolean') {
+    throw autoError(AUTO_TRUNCATE_ERRORS.BAD_CONFIG,
+      `autoTruncate.logRotateDaily must be boolean (got ${JSON.stringify(merged.logRotateDaily)})`);
+  }
   return merged;
 }
 
@@ -273,12 +303,11 @@ function readRequestFile(fsImpl, requestPath) {
 }
 
 /** Append exactly one JSON line; returns the line length or throws. */
-export function appendAutoTruncateLog(memoryRoot, entry) {
+export function appendAutoTruncateLog(memoryRoot, entry, options = {}) {
   const { logDir, logPath } = autoTruncatePaths(memoryRoot);
   fs.mkdirSync(logDir, { recursive: true });
-  const line = `${JSON.stringify(entry)}\n`;
-  fs.appendFileSync(logPath, line);
-  return { logPath, line, bytes: Buffer.byteLength(line) };
+  const written = appendJsonlRotated(logPath, entry, normalizeLogRotation(options));
+  return { logPath, line: '', bytes: written.bytes, rotated: written.rotated, rotatedTo: written.rotatedTo };
 }
 
 /**
@@ -330,6 +359,12 @@ export function createAutoTruncator(options = {}) {
     : null;
   const home = options.home ?? null;
   const config = normalizeAutoTruncateConfig(options.autoTruncate);
+  // fold.triggerTokens is the 1.8.3 policy mapping; autoTruncate.tokensThreshold
+  // remains the explicit truncation override when present.
+  if (options.autoTruncate?.tokensThreshold === undefined
+    && Number.isInteger(options.fold?.triggerTokens) && options.fold.triggerTokens > 0) {
+    config.tokensThreshold = options.fold.triggerTokens;
+  }
   const now = options.now ?? Date.now;
   const fsImpl = options.fs ?? fs;
   // Written into the request so the orchestrator knows what to close, restart
@@ -340,8 +375,44 @@ export function createAutoTruncator(options = {}) {
     : (typeof process.execPath === 'string' ? process.execPath : '');
   const pluginDir = options.pluginDir
     ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const logger = options.logger && typeof options.logger.warn === 'function' ? options.logger : null;
+  const policyEnforceability = thresholdEnforceability();
+  if (logger && config.enabled) {
+    // 1.8.3: expose the policy-vs-enforceability boundary once per startup.
+    logger.warn(`[threshold-policy] ${THRESHOLD_POLICY_WARNING}`);
+  }
+  const logOptions = {
+    maxBytes: config.logMaxBytes,
+    maxAgeDays: config.logMaxAgeDays,
+    maxFiles: config.logMaxFiles,
+    rotateDaily: config.logRotateDaily,
+  };
+  const appendLog = (entry) => appendAutoTruncateLog(memoryRoot, entry, logOptions);
+
+  // Publish an initial status immediately so a panel can show mode=dryrun (and
+  // "no evaluation yet") before the first turn/end. A write failure only warns.
+  if (memoryRoot) {
+    try {
+      recordAutoTruncateStatus(memoryRoot, {
+        mode: config.mode,
+        enabled: config.enabled,
+        thresholds: {
+          tokensThreshold: config.tokensThreshold,
+          minTurns: config.minTurns,
+          keepTurns: config.keepTurns,
+          keepTokens: config.keepTokens,
+          boundaryRetries: config.boundaryRetries,
+        },
+        outcome: 'startup',
+      }, { now: clockMs(now) });
+    } catch (error) {
+      if (logger) logger.warn(`[auto-truncate] initial status write failed: ${error?.message ?? error}`);
+    }
+  }
 
   const seen = new Map();
+  const foldWarnings = new Set();
+  const truncateWarnings = new Map();
 
   function rememberTurn(sessionId, turn) {
     seen.set(sessionId, turn);
@@ -355,7 +426,7 @@ export function createAutoTruncator(options = {}) {
     return state.sessions?.[sessionId] ?? null;
   }
 
-  function markEvaluated(sessionId, at, turn, estimate, outcome) {
+  function markEvaluated(sessionId, at, turn, estimate, outcome, policy = null) {
     const state = readAutoTruncateState(memoryRoot);
     state.sessions[sessionId] = {
       lastEvaluatedAt: at,
@@ -364,6 +435,11 @@ export function createAutoTruncator(options = {}) {
       turns: estimate.turns,
       mode: config.mode,
       status: outcome,
+      ...(policy ? {
+        outputReserveMode: policy.outputReserveMode ?? 'normal',
+        outputReserveTokens: policy.outputReserveTokens ?? OUTPUT_RESERVE_NORMAL_TOKENS,
+        lastPolicyAction: policy.action ?? null,
+      } : {}),
     };
     writeAutoTruncateState(memoryRoot, state);
   }
@@ -374,10 +450,38 @@ export function createAutoTruncator(options = {}) {
       sessionId,
       sessionPath,
       mode: config.mode,
-      // Only present when the operator's config still said "apply". The old
-      // apply-only fields (applied/before/after/delta/hostReloadRequired) are
-      // intentionally no longer emitted; readers may still see them in 0.7.0
-      // history, but no new line can carry them.
+      // 1.8.3 shared-window budget: input estimate, actual-output estimate (when
+      // supplied by the host) and the reserve used for this decision.
+      estimatedInputTokens: estimate.tokens,
+      estimatedOutputTokens: threshold.actualOutputTokens ?? null,
+      outputReserveTokens: threshold.reserveTokens ?? OUTPUT_RESERVE_NORMAL_TOKENS,
+      actual_output_tokens: threshold.actualOutputTokens ?? null,
+      finish_reason: threshold.finishReason ?? null,
+      truncated: threshold.truncated === true,
+      reserve_class: threshold.reserveMode ?? 'long',
+      fold_failed: threshold.foldFailureReason ?? null,
+      fold_busy: threshold.foldFailureReason === 'busy',
+      fold_retry_at: threshold.foldRetryAt ?? null,
+      fold_retry_turn: threshold.foldRetryTurn ?? null,
+      // Fold (host compaction) and truncate (direct cut) are separate events.
+      foldTriggered: threshold.foldTriggered === true,
+      foldBeforeTokens: estimate.tokens,
+      foldAfterTokens: null,
+      truncateReason: threshold.policyAction === 'handoff' ? threshold.policyReason : null,
+      truncateExecution: threshold.policyAction === 'handoff' ? 'NEXT_SAFE_OFFLINE' : null,
+      escalation_exit: threshold.policyAction === 'handoff' ? 'restart-or-external-visible-truncate' : null,
+      restart_required: threshold.policyAction === 'handoff',
+      escalation_round: threshold.escalationRound ?? null,
+      truncatePending: threshold.policyAction === 'handoff',
+      truncateHandoffLine: threshold.inputHardLimitTokens ?? null,
+      finishReason: typeof threshold.finishReason === 'string' ? threshold.finishReason : null,
+      truncated: threshold.truncated === true,
+      foldFailed: threshold.foldFailed === true,
+      foldFailureReason: threshold.foldFailureReason ?? null,
+      foldRetryNextTurn: threshold.foldRetryNextTurn === true,
+      truncateBeforeTokens: estimate.tokens,
+      truncateAfterTokens: null,
+      ...(threshold.policy ? { policy: threshold.policy } : {}),
       ...(config.modeAlias ? { modeAlias: config.modeAlias } : {}),
       estimate: {
         tokens: estimate.tokens,
@@ -400,7 +504,7 @@ export function createAutoTruncator(options = {}) {
    * @param {string} [info.sessionPath] explicit path (tests); otherwise resolved
    * @returns {object} a small status record (never throws)
    */
-  function onTurnEnd(info = {}) {
+  function evaluateOnTurnEnd(info = {}) {
     const status = { status: 'skipped' };
     try {
       const sessionId = typeof info.sessionId === 'string' ? info.sessionId : '';
@@ -443,17 +547,101 @@ export function createAutoTruncator(options = {}) {
       const buf = fsImpl.readFileSync(sessionPath);
       const parsed = parseSession(buf);
       const estimate = sessionEstimate(parsed);
+      const actualOutputTokens = Number.isFinite(Number(info.actualOutputTokens)) && Number(info.actualOutputTokens) >= 0
+        ? Number(info.actualOutputTokens)
+        : null;
+      const longOutput = prior?.outputReserveMode === 'long' ? true : null;
+      const foldFailure = info.foldOutcome ? classifyFoldFailure(info.foldOutcome) : null;
+      const foldRetry = foldFailure ? foldRetrySchedule({ turn: Number.isInteger(turn) ? turn : 0, now: at }) : null;
+      const fold = evaluateFoldTrigger({ inputTokens: estimate.tokens });
+      const policy = evaluateTruncateBudget({
+        inputTokens: estimate.tokens,
+        actualOutputTokens,
+        longOutput,
+        contextWindowTokens: CONTEXT_WINDOW_TOKENS,
+        safetyTokens: SAFETY_TOKENS,
+      });
+      const requiresCut = policy.action === 'handoff';
+      let truncateWarningRound = 0;
+      if (requiresCut) {
+        truncateWarningRound = (truncateWarnings.get(sessionId) ?? 0) + 1;
+        truncateWarnings.set(sessionId, truncateWarningRound);
+      }
+      if (foldFailure && logger) {
+        logger.warn(`[fold-policy] fold ${foldFailure.reason}: retry next turn (not silent)`);
+      }
+      if (fold.triggered && logger) {
+        // Fold needs host compaction; the plugin only records/warns here.
+        logger.warn(`[fold-policy] input=${fold.inputTokens} >= fold.triggerTokens=${fold.triggerTokens}; `
+          + 'host compaction is required, but this plugin cannot force a fold in the current pre-step');
+      }
+      if (requiresCut && logger && (truncateWarningRound === 1 || truncateWarningRound % 3 === 0)) {
+        logger.warn(`[truncate-policy] 升级出口/重启建议：必须重启或外部执行 visible-truncate; `
+          + `reason=${policy.reason} input=${policy.inputTokens} reserve=${policy.reserveTokens} `
+          + `safety=${policy.safetyTokens} round=${truncateWarningRound} (NEXT_SAFE_OFFLINE; no in-turn block)`);
+      }
       const threshold = {
         tokens: config.tokensThreshold,
         minTurns: config.minTurns,
-        exceeded: estimate.tokens >= config.tokensThreshold && estimate.turns > config.minTurns,
+        // 1.8.3 shared-window budget: policy compact at 350K and the hard
+        // input+reserve+safety line both trigger; pure output-over-reserve only
+        // warns and raises the next-turn reserve.
+        exceeded: (estimate.tokens >= config.tokensThreshold && estimate.turns > config.minTurns) || requiresCut,
+        actualOutputTokens,
+        reserveTokens: policy.outputReserveTokens,
+        reserveMode: policy.reserveMode ?? 'long',
+        inputHardLimitTokens: policy.inputHardLimitTokens,
+        policyAction: policy.action,
+        policyReason: policy.reason,
+        escalationRound: truncateWarningRound || null,
+        escalationExit: requiresCut ? 'restart-or-external-visible-truncate' : null,
+        foldTriggered: fold.triggered,
+        finishReason: typeof info.finishReason === 'string' ? info.finishReason : null,
+        truncated: info.truncated === true,
+        foldFailed: foldFailure?.foldFailed === true,
+        foldFailureReason: foldFailure?.reason ?? null,
+        foldRetryNextTurn: foldFailure?.retryNextTurn === true,
+        foldRetryAt: foldRetry?.retryAt ?? null,
+        foldRetryTurn: foldRetry?.retryTurn ?? null,
+        outputOverReserve: policy.outputOverReserve,
+        nextReserveMode: policy.reserveMode === 'long' || policy.action === 'switch-long-output-or-segment' ? 'long' : 'normal',
+        policy: {
+          action: policy.action,
+          reason: policy.reason,
+          inputTokens: policy.inputTokens,
+          reserveTokens: policy.reserveTokens,
+          inputHardLimitTokens: policy.inputHardLimitTokens,
+          safetyTokens: policy.safetyTokens,
+          outputOverReserve: policy.outputOverReserve,
+          enforced: policyEnforceability.enforced,
+          hostMaxTokensConfigurable: policyEnforceability.hostMaxTokensConfigurable,
+        },
       };
 
       // Below the threshold the evaluation still consumes the cooldown window:
       // the spec's debounce is per-session evaluation, not per-action.
-      markEvaluated(sessionId, at, turn, estimate, threshold.exceeded ? 'over' : 'below');
+      markEvaluated(sessionId, at, turn, estimate, threshold.exceeded ? 'over' : 'below', {
+        outputReserveMode: threshold.nextReserveMode,
+        outputReserveTokens: policy.outputReserveTokens,
+        action: policy.action,
+      });
+      if (actualOutputTokens !== null && (policy.action === 'switch-long-output-or-segment' || policy.outputOverReserve || policy.action === 'handoff')) {
+        // 1.8.3: never silently ignore an actual output that outgrew its
+        // reserve; the next turn uses the long-output reserve.
+        if (logger) {
+          logger.warn(`[threshold-policy] actual_output=${actualOutputTokens} reserve=${policy.outputReserveTokens} `
+            + `input=${policy.inputTokens}; next-turn reserve=long (${INPUT_COMPACT_AT_TOKENS / 1000}K compact line); `
+            + `action=${policy.action}`);
+        }
+      }
       if (!threshold.exceeded) {
-        return { ...status, reason: 'below-threshold', estimate, threshold };
+        return {
+          ...status,
+          ...(foldFailure ? { status: 'fold-warning', foldFailure } : {}),
+          ...(policy.action === 'switch-long-output-or-segment' ? { status: 'policy-warning' } : {}),
+          reason: policy.action === 'switch-long-output-or-segment' ? 'actual-output-over-reserve' : 'below-threshold',
+          estimate, threshold, policy,
+        };
       }
 
       const common = baseEntry({ sessionId, sessionPath, at, estimate, threshold });
@@ -501,7 +689,7 @@ export function createAutoTruncator(options = {}) {
             }
             : { needed: false, reason: plan.reason },
         };
-        const written = appendAutoTruncateLog(memoryRoot, entry);
+        const written = appendLog(entry);
         return { status: 'logged', action: entry.action, logPath: written.logPath, entry };
       }
 
@@ -513,6 +701,12 @@ export function createAutoTruncator(options = {}) {
           firstUserCapChars: config.firstUserCapChars,
           boundaryRetries: config.boundaryRetries,
           now: at,
+          // Dry runs do not archive, so no diag row is written here; passing the
+          // root keeps the option surface uniform for the real CLI/manual path.
+          memoryRoot,
+          turn,
+          logger,
+          diagOptions: logOptions,
         });
         if (result.feasible === false) {
           // 0.8.0-rc.11: an infeasible dry run is a result, not an exception.
@@ -526,6 +720,7 @@ export function createAutoTruncator(options = {}) {
             code: result.code,
             reason: result.reason,
             attempts: result.attempts,
+            limit: result.limit ?? result.plan?.infeasible?.limit ?? null,
             session: {
               origin: parsed.header?.origin ?? null,
               parentSession: parsed.header?.parentSession ?? null,
@@ -533,13 +728,14 @@ export function createAutoTruncator(options = {}) {
             plan: { needed: true, feasible: false, reason: result.reason },
             wroteSessionFile: false,
           };
-          const written = appendAutoTruncateLog(memoryRoot, entry);
+          const written = appendLog(entry);
           return {
             status: 'dryrun-infeasible',
             action: entry.action,
             code: entry.code,
             logPath: written.logPath,
             entry,
+            limit: entry.limit ?? null,
           };
         }
         const entry = {
@@ -571,7 +767,7 @@ export function createAutoTruncator(options = {}) {
             : { needed: false, reason: result.reason ?? null },
           wroteSessionFile: false,
         };
-        const written = appendAutoTruncateLog(memoryRoot, entry);
+        const written = appendLog(entry);
         return { status: 'dryrun', action: entry.action, logPath: written.logPath, entry };
       }
 
@@ -659,7 +855,7 @@ export function createAutoTruncator(options = {}) {
             : { needed: false, reason: plan.reason },
           wroteSessionFile: false,
         };
-        const written = appendAutoTruncateLog(memoryRoot, entry);
+        const written = appendLog(entry);
         return {
           status: 'request-pending',
           action: entry.action,
@@ -694,7 +890,7 @@ export function createAutoTruncator(options = {}) {
           quarantinedFile: quarantine?.ok ? quarantine.to : undefined,
           wroteSessionFile: false,
         };
-        const written = appendAutoTruncateLog(memoryRoot, entry);
+        const written = appendLog(entry);
         return {
           status: 'request-none',
           action: entry.action,
@@ -719,7 +915,7 @@ export function createAutoTruncator(options = {}) {
           quarantinedFile: quarantine?.ok ? quarantine.to : undefined,
           wroteSessionFile: false,
         };
-        const written = appendAutoTruncateLog(memoryRoot, entry);
+        const written = appendLog(entry);
         return {
           status: 'request-infeasible',
           action: entry.action,
@@ -789,7 +985,7 @@ export function createAutoTruncator(options = {}) {
           wroteSessionFile: false,
         };
         try {
-          const written = appendAutoTruncateLog(memoryRoot, failure);
+          const written = appendLog(failure);
           return { status: 'request-failed', code: failure.code, logPath: written.logPath, entry: failure };
         } catch (logError) {
           return { status: 'request-failed', code: failure.code, logError: logError.message };
@@ -828,7 +1024,7 @@ export function createAutoTruncator(options = {}) {
         },
         wroteSessionFile: false,
       };
-      const written = appendAutoTruncateLog(memoryRoot, entry);
+      const written = appendLog(entry);
       return {
         status: 'request-written',
         action: entry.action,
@@ -861,7 +1057,7 @@ export function createAutoTruncator(options = {}) {
       let logError = null;
       if (memoryRoot) {
         try {
-          logPath = appendAutoTruncateLog(memoryRoot, entry).logPath;
+          logPath = appendLog(entry).logPath;
         } catch (writeError) {
           logError = writeError?.message ?? String(writeError);
         }
@@ -878,6 +1074,95 @@ export function createAutoTruncator(options = {}) {
     }
   }
 
+  function publishStatus(result, info) {
+    if (!memoryRoot) return null;
+    const entry = result?.entry ?? null;
+    const status = result?.status ?? 'unknown';
+    const action = entry?.action ?? null;
+    const overExceeded = Boolean(result?.threshold?.exceeded || entry?.threshold?.exceeded);
+    const infeasible = /infeasible/u.test(status) || /infeasible/u.test(action ?? '');
+    const error = status === 'error' || action === 'error' || status === 'request-failed' || action === 'request-failed';
+    const skipped = status === 'skipped';
+    const delta = { evaluations: skipped ? 0 : 1 };
+    if (skipped) delta.skipped = 1;
+    else if (overExceeded) delta.over = 1;
+    else if (infeasible) delta.infeasible = 1;
+    else if (error) delta.error = 1;
+    else if (status === 'logged') delta.logged = 1;
+    else if (status === 'dryrun') delta.dryrun = 1;
+    else if (status === 'request-written') delta.requestWritten = 1;
+    else if (status === 'request-pending') delta.requestPending = 1;
+    else if (status === 'request-none') delta.noop = 1;
+    if (infeasible) delta.infeasible = 1;
+    if (error) delta.error = 1;
+
+    const at = new Date(clockMs(now)).toISOString();
+    const overSample = overExceeded ? {
+      sessionId: info?.sessionId ?? null,
+      tokens: entry?.estimate?.tokens ?? result?.estimate?.tokens ?? null,
+      turns: entry?.estimate?.turns ?? result?.estimate?.turns ?? null,
+      turn: Number.isInteger(info?.turn) ? info.turn : entry?.lastTurn ?? null,
+      at,
+    } : null;
+    const lastError = error ? {
+      at,
+      sessionId: info?.sessionId ?? null,
+      code: result?.code ?? entry?.code ?? 'AUTO_EVALUATE_FAILED',
+      message: String(result?.message ?? entry?.message ?? result?.reason ?? 'error').slice(0, 500),
+    } : null;
+    const lastInfeasible = infeasible ? {
+      at,
+      sessionId: info?.sessionId ?? null,
+      code: result?.code ?? entry?.code ?? 'AUTO_INFEASIBLE',
+      reason: String(result?.reason ?? entry?.reason ?? entry?.message ?? 'infeasible').slice(0, 500),
+      limit: result?.limit ?? entry?.limit ?? null,
+    } : null;
+    const warning = error
+      ? `evaluation error: ${lastError.code} ${lastError.message}`
+      : (infeasible
+        ? `infeasible cut: ${lastInfeasible.code} ${lastInfeasible.reason}`
+        : (overExceeded
+          ? `session ${info?.sessionId ?? '?'} is over threshold (${result?.threshold?.tokens ?? entry?.threshold?.tokens ?? '?'} tokens)`
+          : null));
+    let published = null;
+    try {
+      published = recordAutoTruncateStatus(memoryRoot, {
+        mode: config.mode,
+        enabled: config.enabled,
+        thresholds: {
+          tokensThreshold: config.tokensThreshold,
+          minTurns: config.minTurns,
+          keepTurns: config.keepTurns,
+          keepTokens: config.keepTokens,
+          boundaryRetries: config.boundaryRetries,
+        },
+        delta,
+        outcome: result?.status ?? 'unknown',
+        overSample,
+        error: lastError,
+        infeasible: lastInfeasible,
+        warning,
+      }, { now: clockMs(now) });
+    } catch (statusError) {
+      if (logger) logger.warn(`[auto-truncate] status write failed: ${statusError?.message ?? statusError}`);
+    }
+    if (warning && logger) logger.warn(`[auto-truncate] ${warning}`);
+    return published;
+  }
+
+  // Public entry: evaluate, then always publish the operator-visible status.
+  // evaluateOnTurnEnd never throws; the status publish is also guarded so a
+  // broken status file can never fail the host's turn/end feed.
+  function onTurnEnd(info = {}) {
+    const result = evaluateOnTurnEnd(info);
+    try {
+      publishStatus(result, info);
+    } catch (error) {
+      if (logger) logger.warn(`[auto-truncate] status publish failed: ${error?.message ?? error}`);
+    }
+    return result;
+  }
+
   return {
     config,
     onTurnEnd,
@@ -885,7 +1170,9 @@ export function createAutoTruncator(options = {}) {
     logPath: memoryRoot ? autoTruncatePaths(memoryRoot).logPath : null,
     statePath: memoryRoot ? autoTruncatePaths(memoryRoot).statePath : null,
     requestPath: memoryRoot ? autoTruncatePaths(memoryRoot).requestPath : null,
+    statusPath: memoryRoot ? path.join(memoryRoot, '.longlive', 'auto-truncate-status.json') : null,
     appExe,
     pluginDir,
+    logger,
   };
 }

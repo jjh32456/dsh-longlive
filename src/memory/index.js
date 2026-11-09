@@ -21,6 +21,7 @@ import {
   appendAudit, listMarkdownFiles, updateState, writeFileAtomic,
 } from './state.js';
 import { PROCEDURES_DIR, scanProcedures } from './procedure.js';
+import { getIndexFreshness } from './index-freshness.js';
 
 export const BEGIN_GENERATED = '<!-- BEGIN GENERATED -->';
 export const END_GENERATED = '<!-- END GENERATED -->';
@@ -28,6 +29,41 @@ export const INDEX_FILE = 'INDEX.md';
 export const PROCEDURES_HEADING = `### 程序性（${PROCEDURES_DIR}/）`;
 
 const SCAN_DIRS = ['topics', 'journal'];
+export const RAW_DIRS = ['raw', 'topics/raw'];
+export const RAW_INDEX_POLICY = 'excluded-by-default';
+export const RAW_OPT_IN_FIELD = 'index';
+
+/**
+ * Raw source material is deliberately NOT part of the generated card table:
+ * it is evidence/archive, and indexing every transcript would make INDEX.md a
+ * second copy of the session log. The rule is explicit and documented in
+ * docs/RAW-INDEX-POLICY.md. A future opt-in can be added by frontmatter
+ * `index: true`; this scan reports those files instead of silently ignoring
+ * them.
+ */
+export function scanRawPolicy(root) {
+  const files = [];
+  const optIn = [];
+  for (const dir of RAW_DIRS) {
+    for (const abs of listMarkdownFiles(root, dir)) {
+      const rel = relativePath(root, abs);
+      if (path.basename(rel) === 'INDEX-POLICY.md') continue;
+      files.push(rel);
+      try {
+        const parsed = parseFrontmatter(fs.readFileSync(abs, 'utf8'));
+        if (parsed.fields?.[RAW_OPT_IN_FIELD] === true || parsed.fields?.[RAW_OPT_IN_FIELD] === 'true') optIn.push(rel);
+      } catch { /* unreadable raw file is reported, not silently dropped */ }
+    }
+  }
+  return {
+    policy: RAW_INDEX_POLICY,
+    included: false,
+    optInSupported: true,
+    files,
+    optIn,
+    note: 'raw/ 与 topics/raw/ 默认不入 INDEX；仅扫描条目数并明确报告。',
+  };
+}
 
 function collapse(text) {
   return String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -81,6 +117,10 @@ export function scanCards(root) {
   const cards = [];
   for (const dir of SCAN_DIRS) {
     for (const abs of listMarkdownFiles(root, dir)) {
+      const rel = relativePath(root, abs);
+      // A1 v2: auto-* staging is deliberately outside the recall surface until
+      // a human/dream review promotes it to a regular topic card.
+      if (rel.startsWith('topics/auto/')) continue;
       cards.push(readCard(root, abs));
     }
   }
@@ -96,6 +136,10 @@ export function scanCards(root) {
 
 function cell(value) {
   return collapse(value).replace(/\|/g, '\\|');
+}
+
+function withoutGeneratedStamp(text) {
+  return String(text ?? '').replace(/<!-- generated: [^>]* -->/gu, '<!-- generated: <stamp> -->');
 }
 
 function procedureRow(card) {
@@ -118,7 +162,7 @@ function statusCounts(cards) {
  * 「程序性」 table. A procedure card has `procedure: true` and is written only
  * to the second table, so it never shows up twice.
  */
-export function buildGeneratedSection(allCards, now = new Date()) {
+export function buildGeneratedSection(allCards, now = new Date(), options = {}) {
   const cards = allCards.filter((card) => card.procedure !== true);
   const procedures = allCards.filter((card) => card.procedure === true);
   const legacy = allCards.filter((card) => card.legacy).length;
@@ -203,6 +247,7 @@ export function memoryIndex(args = {}, config = {}) {
   const core = scanCards(root);
   const { cards: procedures, invalid: invalidCards } = scanProcedures(root);
   const cards = [...core, ...procedures.map((card) => ({ ...card, procedure: true }))];
+  const rawPolicy = scanRawPolicy(root);
   const section = buildGeneratedSection(cards, now);
   const legacy = cards.filter((card) => card.legacy).length;
   const counts = statusCounts(cards);
@@ -214,27 +259,55 @@ export function memoryIndex(args = {}, config = {}) {
   const before = existed ? fs.readFileSync(indexPath, 'utf8') : '';
   const after = mergeGenerated(before, section);
   const changed = before !== after;
+  // A generated timestamp alone is not a content change; capture/ifChanged must
+  // not rewrite/back up INDEX.md on every turn just because time moved.
+  const contentChanged = withoutGeneratedStamp(before) !== withoutGeneratedStamp(after);
+  const base = {
+    root,
+    indexPath,
+    cards: cards.length,
+    legacy,
+    procedures: procedures.length,
+    invalid,
+    rawPolicy,
+    ...counts,
+    changed,
+    contentChanged,
+    generated: section,
+  };
 
   if (!apply) {
     return {
+      ...base,
       ok: true,
       status: 'dry-run',
       dryRun: true,
       applied: false,
-      root,
-      indexPath,
-      cards: cards.length,
-      legacy,
-      procedures: procedures.length,
-      invalid,
-      ...counts,
-      changed,
-      generated: section,
+      freshness: getIndexFreshness({ memoryRoot: root, now }),
       wouldWrite: after,
       message:
         `dry-run：扫描到 ${cards.length} 张卡（legacy ${legacy}，程序性 ${procedures.length}` +
-        `${invalid > 0 ? `，坏卡 ${invalid}` : ''}）→ ${changed ? 'INDEX.md 会变化' : 'INDEX.md 已是最新'}；` +
-        '加 apply:true 才落盘',
+        `${invalid > 0 ? `，坏卡 ${invalid}` : ''}）；raw 策略=${rawPolicy.policy}` +
+        `→ ${changed ? 'INDEX.md 会变化' : 'INDEX.md 已是最新'}；加 apply:true 才落盘`,
+    };
+  }
+
+  if (args.ifChanged === true && !contentChanged) {
+    updateState(root, {
+      indexLastRefreshAt: now.toISOString(),
+      indexFreshness: 'fresh',
+      indexLastError: null,
+    }, { now });
+    const freshness = getIndexFreshness({ memoryRoot: root, now });
+    return {
+      ...base,
+      ok: true,
+      status: 'unchanged',
+      dryRun: false,
+      applied: false,
+      freshness,
+      indexBuiltAt: freshness.generatedAt,
+      message: `INDEX.md 已是最新（${cards.length} 行），未重写。`,
     };
   }
 
@@ -243,27 +316,28 @@ export function memoryIndex(args = {}, config = {}) {
   if (readBack !== after) {
     throw memoryError('E_INDEX_VERIFY', `INDEX.md 写入后读回不一致：${indexPath}`);
   }
-  updateState(root, { indexBuiltAt: now.toISOString() }, { now });
+  updateState(root, {
+    indexBuiltAt: now.toISOString(),
+    indexDataAt: now.toISOString(),
+    indexFreshness: 'fresh',
+    indexLagMs: 0,
+    indexLastRefreshAt: now.toISOString(),
+    indexLastError: null,
+  }, { now });
   appendAudit(root, {
     action: 'memory_index',
     object: INDEX_FILE,
-    result: `cards=${cards.length} legacy=${legacy} procedures=${procedures.length} invalid=${invalid} changed=${changed}`,
+    result: `cards=${cards.length} legacy=${legacy} procedures=${procedures.length} invalid=${invalid} raw=${rawPolicy.policy} changed=${changed}`,
     now,
   });
+  const freshness = getIndexFreshness({ memoryRoot: root, now });
   return {
+    ...base,
     ok: true,
     status: 'applied',
     dryRun: false,
     applied: true,
-    root,
-    indexPath,
-    cards: cards.length,
-    legacy,
-    procedures: procedures.length,
-    invalid,
-    ...counts,
-    changed,
-    generated: section,
+    freshness,
     backup: write.backup,
     backupRel: write.backupRel,
     sha256: write.sha256,

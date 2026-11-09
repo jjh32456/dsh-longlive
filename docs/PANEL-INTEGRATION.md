@@ -5,6 +5,7 @@
 - `GET /api/longlive-panel/v2/state` 返回 **27 条路由 / 18 个动作**（1.8.0 验收口径，见 `RELEASE-1.8.0-CHECKLIST.md` §5）。
 - 「本轮想起」审计入口 = `<memoryRoot>/.longlive/recall-log.jsonl`（行格式见 `AUTO-RECALL.md`「recall-log」）。
 - 本文件只定义手术回执等接口约定，不重复面板其余路由。
+- **working-frame（工作帧）**：面板工作帧路由映射宿主真实路由 **#23 `/api/longlive/frames`**，取最近一帧；无帧返回 `200 {present:false}` 空态，不新建帧、不写盘。
 
 本文只定义**接口约定与数据形状**，不要求改面板仓库。潜望镜面板（@jjh32456/dsh-longlive-panel）
 如果已有「会话 / 截断」页签，加一个小字段即可；没有就按下面的形状做一个只读卡片。

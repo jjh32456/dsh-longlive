@@ -1,4 +1,20 @@
-# 1.8.0 可选能力与开关
+# 1.8.3 可选能力与开关
+
+## 1.8.3 A1 结论候选池（默认开启）
+
+- A1 只从 **user 消息中的决定**（定了/决定/拍板/就这样/改成/以后都…）生成候选，写入
+  `<memoryRoot>/.longlive/index/conclusion-drafts.jsonl`；assistant 文本不参与判定。
+- 维护任务蒸馏时要求完整 userText 与 L0 user/message 匹配（hash+digest+原文），通过的
+  「用户决定」只写 `<memoryRoot>/.longlive/staging/auto-cards/`（隐藏 staging，salience 2），
+  `scanCards`/recall-v2/INDEX 不读；需人工/梦审后提升为正式卡。
+- `conclusionDraft.ttlDays`（默认 30）到期归档到 `.longlive/archive/conclusion-drafts/`，
+  TTL 不受 `conclusionDistill.enabled` 影响；`autoConclusion:false` 才全关。
+- **升级/回滚**：1.8.0→1.8.3 保留旧卡与候选；rc.4 新 auto 卡在 `.longlive/staging/auto-cards/`，
+  1.8.0 的 `scanCards` 实测扫不到该目录（0 命中）。rc.2/rc.3 遗留的 `topics/auto/` 会由 rc.4
+  维护 job 自动迁入 staging；迁移前直接回滚仍可能被 1.8.0 递归扫到，回滚前先跑一次 rc.4
+  维护或手工移出 `topics/auto/`。auto 卡不是正式召回面的一部分。
+  rc.5 首次维护还会把 1.8.0 旧 `topics/conclusion-t*.md` 迁到 `legacy-1.8.0/`；命令与人工审/
+  恢复见 [A1-MIGRATION.md](A1-MIGRATION.md)。
 
 1.8.0 在 1.6.8 之上新增/变更：**有据才答的注入修复 + 来源闸**（信心闸默认关）、**插件功能默认开启**
 （未显式给则 true，仅字面 `false` 关闭；含 autoRecall / identityCard / presenceBus / sharedBrain.activity /
@@ -280,7 +296,7 @@ Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/rou
 
 ### `d2`（D2 工具输出裁剪，1.8.0 起默认开启）
 
-- **打开**：写 `d2: { enabled: true }`（`maxInlineChars` 默认 4096），改完重启宿主。
+- **默认状态**：1.8.0 起默认开启（无配置即挂载）；显式 `d2: { enabled: false }` 才关闭，改完重启宿主。
 - **观察**：超限结果里出现一行提示，给出 `<memoryRoot>/.longlive/tool-output/<turn>/<callId>.txt`
   的绝对路径与 `session_original(turn, toolCallId)` 读回方式。
 - **回退**：`d2.enabled: false`（或删掉整个 `d2` 块）后重启；没有数据迁移。已归档的
@@ -369,8 +385,8 @@ Router 还多一道 `routerEnabled`：`false` 时 `src/index.js` 连 `createRout
 
 ### 从 1.5.0 回到 1.4.0
 
-1. 把 `d2.enabled` / `d6.enabled` 改回 `false`（或删掉两个块）；`d6.enabled: false`
-   即不再注册 `tool_search`。
+1. 显式写 `d2: { enabled: false }` / `d6: { enabled: false }`；不要靠“删掉配置块”来关闭
+   （缺省会按默认开启）；`d6.enabled: false` 明确不注册 `tool_search`。
 2. 安装 `dist/dsh-session-longlive-1.4.0.tgz`，重启两次确认 stderr 无 `did not activate`。
 3. 没有数据迁移；`.longlive/tool-output/` 是独立目录，可保留取证或手工删除，不要删
    memoryRoot 下的卡片。

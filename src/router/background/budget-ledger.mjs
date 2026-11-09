@@ -2,7 +2,7 @@
 //
 // 为什么需要它：Router 的预算上限是「每个 run 目录」的，不是「每个进程实例」的。
 // 旧实现把 tokensUsed 放在 Router 实例内存里，两个实例各读同一个审计文件、
-// 各自以为还剩 100，结果 75 + 75 = 150 超支（评审 P02）；重启时又从审计里
+// 各自以为还剩 100，结果 75 + 75 = 150 超支（复核 P02）；重启时又从审计里
 // 取 max(tokens_total) 而不是累加（P03），只恢复了一部分。
 //
 // 账本是一个只追加的 JSONL 文件（默认与 queue 同目录的 budget.ledger.jsonl）：
@@ -13,7 +13,7 @@
 //   - reserve 是全有或全无：剩余不够 callMaxTokens 就返回 E_BUDGET_EXCEEDED，
 //     不写任何记录（绝不出现「先花了再发现超了」）；
 //   - settle 是硬上限：实花只记 min(请求值, 预留, 预算剩余)，超出部分拒绝并
-//     返回 E_BUDGET_OVERSHOOT（评审 P0-1：60+60 重试不得记 120）；
+//     返回 E_BUDGET_OVERSHOOT（复核 P0-1：60+60 重试不得记 120）；
 //   - reserve 记录带 pid / started_at / lease_expires_at；崩溃遗留的 active 预留
 //     在下次启动或下一 tick 时按「pid 不存在」或「租约过期」回收（P0-2）；
 //   - 每条记录带 prev_hash + hash 的链，删整行/改字段会在下次读时暴露（P0-4）；

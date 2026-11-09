@@ -3,19 +3,22 @@
 // At `turn/end` (reason: completed) this bridge looks at the turn's last real
 // user message and the assistant's final text blocks, decides locally — no
 // LLM call — whether the turn contains a conclusion (定了 / 决定 / 结论 /
-// 就这样 / 改成 ...), and, when it does, writes one memory card under
-// `<memoryRoot>/topics/` plus a per-session marker under
-// `<memoryRoot>/.longlive/bridge/` that keeps the same session+turn idempotent
-// and publishes the one-line conclusion the shared board reads (A2).
+// 就这样 / 改成 ...), and, when it does, appends one *draft* to
+// `<memoryRoot>/.longlive/index/conclusion-drafts.jsonl` plus a per-session
+// marker under `<memoryRoot>/.longlive/bridge/` that keeps the same
+// session+turn idempotent and publishes the one-line conclusion the shared
+// board reads (A2). Drafts are raw material only: memory/conclusion-distill.js
+// is the only path that may turn a validated draft into a recallable card.
 //
 // Privacy reuses the auto-recall gate (`recall/privacy.mjs`): a local_only
-// verdict, or a throwing gate, silently drops the card. Every path is wrapped
+// verdict, or a throwing gate, silently drops the draft. Every path is wrapped
 // so a failure never blocks the turn that triggered it.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { dayString, isoStamp, serializeFrontmatter } from './memory/frontmatter.js';
+import { isoStamp } from './memory/frontmatter.js';
+import { appendDraft, draftIdOf } from './memory/conclusion-drafts.js';
 import { privacyScan as defaultPrivacyScan } from './recall/privacy.mjs';
 import { isUserAuthoredMessage } from './truncate-visible.js';
 
@@ -93,38 +96,48 @@ export function classifyConclusionText(text) {
   return null;
 }
 
-/** Short statement other sessions see as 「结论」. */
+/** Short statement other sessions see as 「结论」. v2: user text only. */
 export function pickExcerpt(userText, assistantText) {
-  const assistant = oneLine(assistantText);
   const user = oneLine(userText);
-  const candidate = triggerSentence(assistant)
-    || triggerSentence(user)
-    || firstSentence(assistant)
+  const candidate = sentences(user).find((item) => isUserDecisionText(item))
     || firstSentence(user);
   return clip(oneLine(candidate), CONCLUSION_TEXT_MAX);
 }
 
+/** v2: narrow "user decision" recognizer. Ordinary narration, questions and
+ * long process reports are not decisions even when they contain 定了/所以. */
+const USER_DECISION_START = /(?:^|[，。！？；、\s])(?:好[，,]?\s*)?(?:就这么|就这样|按这个|改成|以后都|决定|拍板|敲定|定稿|定了|就按|就用|行[，,]?\s*就)/u;
+export function isUserDecisionText(text) {
+  const value = oneLine(text);
+  if (value === '' || Array.from(value).length > 160) return false;
+  if (/[？?]\s*$/u.test(value)) return false;
+  if (/(?:什么|吗|呢|怎么|如何)\s*[？?]?\s*$/u.test(value)) return false;
+  if (/(?:行不行|好不好|可以吗|怎么样|如何|是不是|要不要)/u.test(value)) return false;
+  if (/(?:分析|给个|帮我看|告诉我|看看|怎么改|如何改)/u.test(value)) return false;
+  return USER_DECISION_START.test(value);
+}
+
 /**
- * Decide whether this turn is a conclusion. Pure: no IO, no clock.
- * Returns {kind, title, excerpt, text, body} or null.
+ * A1 v2 decision source rule: only a *user-authored decision* can become a
+ * draft. Assistant text may appear in the body as context/evidence, but it is
+ * never consulted for the trigger or the conclusion sentence.
  */
 export function judgeConclusion({ userText, assistantText } = {}) {
   const user = oneLine(userText);
   const assistant = oneLine(assistantText);
   if (Array.from(user).length < 2) return null;
-  if (Array.from(assistant).length < 8) return null;
-  const userKind = classifyConclusionText(user);
-  const assistantKind = classifyConclusionText(assistant);
-  const kind = userKind === 'decision' || assistantKind === 'decision'
-    ? 'decision'
-    : (userKind === 'fact' || assistantKind === 'fact' ? 'fact' : null);
-  if (kind === null) return null;
-  const excerpt = pickExcerpt(user, assistant);
+  if (!isUserDecisionText(user)) return null;
+  const decisionSentence = sentences(user).find((item) => isUserDecisionText(item)) ?? firstSentence(user);
+  const excerpt = clip(oneLine(decisionSentence), CONCLUSION_TEXT_MAX);
   if (excerpt === '') return null;
-  const title = clip(`结论：${excerpt}`, CONCLUSION_TITLE_MAX);
-  // Leave room for prefixes and the newline: 200 + 280 + 8 = 488 < 500.
-  const body = `用户：${clip(user, CONCLUSION_USER_MAX)}\n助手：${clip(assistant, CONCLUSION_ASSISTANT_MAX)}`;
-  return { kind, title, excerpt, text: excerpt, body };
+  // v3: title/body are user text only. No assistant context is stored on the
+  // draft, so no card path can ever copy assistant prose.
+  const title = clip(excerpt, CONCLUSION_TITLE_MAX);
+  const body = `用户：${clip(user, CONCLUSION_USER_MAX)}`;
+  return {
+    kind: 'decision', title, excerpt, text: excerpt, body,
+    sourceRole: 'user', userText: user,
+  };
 }
 
 /** `<memoryRoot>/.longlive/bridge` — same directory A2's board reads. */
@@ -160,25 +173,28 @@ export function conclusionCardFile(memoryRoot, sessionId, turn) {
   return path.join(memoryRoot, 'topics', `${CONCLUSION_CARD_PREFIX}-t${turn}-${hash8(sessionId)}.md`);
 }
 
-function writeCard(memoryRoot, sessionId, turn, at, judged) {
-  const file = conclusionCardFile(memoryRoot, sessionId, turn);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const fields = {
-    title: judged.title,
-    date: dayString(at),
-    tags: ['auto-conclusion'],
-    salience: judged.kind === 'decision' ? 4 : 3,
-    strength: 3,
-  };
-  const extras = {
+/**
+ * A1 1.8.1: the turn's conclusion is only a *draft*. It is appended to the
+ * append-only candidate pool under `.longlive/index/`, never to `topics/`.
+ * Distillation in memory/conclusion-distill.js is the only path to recall.
+ */
+function writeDraft(memoryRoot, sessionId, turn, at, judged, privacyVerdict) {
+  const text = judged.body;
+  const result = appendDraft(memoryRoot, {
+    id: draftIdOf({ sessionId, turn, kind: judged.kind, text }),
+    sessionId,
+    turn,
+    at,
     kind: judged.kind,
-    source_session: sessionId,
-    source_turn: String(turn),
-    written_at: isoStamp(at),
-    at: isoStamp(at),
-  };
-  fs.writeFileSync(file, `${serializeFrontmatter(fields, extras)}\n\n${judged.body}\n`, 'utf8');
-  return file;
+    title: judged.title,
+    excerpt: judged.excerpt,
+    text,
+    privacyVerdict,
+    status: 'pending',
+    sourceRole: 'user',
+    userText: judged.userText ?? judged.body,
+  }, { now: at });
+  return result;
 }
 
 function dateOf(value) {
@@ -250,7 +266,11 @@ export function createConclusionBridge(options = {}) {
     }
     try {
       const at = dateOf(now());
-      const file = writeCard(memoryRoot, state.sessionId, turn, at, judged);
+      const written = writeDraft(memoryRoot, state.sessionId, turn, at, judged, verdict.verdict);
+      if (!written.written) {
+        stats.duplicates += 1;
+        return { written: false, reason: 'duplicate' };
+      }
       const turns = { ...priorTurns };
       turns[String(turn)] = isoStamp(at);
       const keys = Object.keys(turns).sort((a, b) => Number(a) - Number(b));
@@ -268,7 +288,7 @@ export function createConclusionBridge(options = {}) {
         turns,
       });
       stats.written += 1;
-      return { written: true, reason: 'written', file, kind: judged.kind, text: judged.text };
+      return { written: true, reason: 'drafted', draft: written.entry, kind: judged.kind, text: judged.text };
     } catch {
       stats.errors += 1;
       return { written: false, reason: 'error' };

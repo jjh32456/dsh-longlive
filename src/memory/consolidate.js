@@ -17,9 +17,10 @@ import {
   parseFrontmatter, dayString, isoStamp, isDayString,
 } from './frontmatter.js';
 import {
-  ensureDir, reportsDir, readState, updateState, listMarkdownFiles, writeFileAtomic,
+  ensureDir, reportsDir, readState, updateState, listMarkdownFiles, writeFileAtomic, appendAudit,
 } from './state.js';
 import { scanCards } from './index.js';
+import { writeCard } from './cards.js';
 
 const RESOLVED_STATUS = new Set(['accepted', 'rejected', 'superseded']);
 const AFFECT_KEYWORD = /^affect\b/i;
@@ -475,6 +476,132 @@ function lastDayOf(value) {
   return /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
 }
 
+function proposalBacklog(entries) {
+  const list = Array.isArray(entries) ? entries.filter((entry) => entry && typeof entry.id === 'string') : [];
+  const counts = { proposed: 0, accepted: 0, rejected: 0, superseded: 0 };
+  for (const entry of list) {
+    const status = RESOLVED_STATUS.has(entry.status) ? entry.status : 'proposed';
+    counts[status] += 1;
+  }
+  const days = new Map();
+  for (const entry of list) {
+    const status = RESOLVED_STATUS.has(entry.status) ? entry.status : 'proposed';
+    if (!days.has(entry.day)) days.set(entry.day, { proposed: 0, resolved: 0 });
+    const day = days.get(entry.day);
+    if (status === 'proposed') day.proposed += 1;
+    else day.resolved += 1;
+  }
+  return {
+    total: list.length,
+    pending: counts.proposed,
+    resolved: counts.accepted + counts.rejected + counts.superseded,
+    ...counts,
+    byDay: [...days.entries()].filter(([day]) => typeof day === 'string').sort(([a], [b]) => a.localeCompare(b))
+      .map(([day, countsDay]) => ({ day, ...countsDay })),
+  };
+}
+
+function advanceLastConsolidated(state, entries) {
+  const current = lastDayOf(state.lastConsolidated);
+  const days = [...new Set(entries.map((entry) => entry.day).filter((day) => typeof day === 'string'))].sort();
+  let last = current;
+  for (const day of days) {
+    if (last !== null && day <= last) continue;
+    const dayEntries = entries.filter((entry) => entry.day === day);
+    if (dayEntries.length > 0 && dayEntries.every((entry) => RESOLVED_STATUS.has(entry.status))) last = day;
+  }
+  return last;
+}
+
+/**
+ * Accept or reject one consolidation proposal.
+ *
+ * accept -> write a NEW topic card through the normal `writeCard` path (old
+ * cards are never edited) + audit; reject -> record the operator's reason +
+ * audit. Both advance lastConsolidated over fully resolved days.
+ */
+export function resolveConsolidationProposal(args = {}, config = {}) {
+  const action = args.action;
+  if (action !== 'accept' && action !== 'reject') {
+    throw memoryError('E_BAD_ARGUMENT', 'consolidation resolve 需要 action=accept|reject');
+  }
+  const proposalIdValue = typeof args.proposalId === 'string' ? args.proposalId.trim() : '';
+  if (!/^[0-9a-f]{12}$/i.test(proposalIdValue)) throw memoryError('E_BAD_ARGUMENT', '需要 12 位 proposalId');
+  const root = memoryRootFromConfig(config);
+  const now = config.now instanceof Date ? config.now : new Date();
+  const state = readState(root);
+  const entries = (Array.isArray(state.seenProposals) ? state.seenProposals : [])
+    .filter((entry) => entry && typeof entry.id === 'string');
+  const index = entries.findIndex((entry) => entry.id === proposalIdValue);
+  if (index < 0) throw memoryError('E_PROPOSAL_NOT_FOUND', `找不到提案 ${proposalIdValue}`);
+  const entry = entries[index];
+  if (RESOLVED_STATUS.has(entry.status)) {
+    throw memoryError('E_PROPOSAL_RESOLVED', `提案 ${proposalIdValue} 已是 ${entry.status}`);
+  }
+  let card = null;
+  let audited = null;
+  if (action === 'accept') {
+    const rel = `topics/consolidated/${proposalIdValue}.md`;
+    const title = collapse(entry.excerpt ?? entry.claim ?? proposalIdValue).slice(0, 80);
+    const claim = collapse(entry.claim ?? entry.excerpt ?? '').slice(0, 400);
+    const body = [
+      `# ${title}`,
+      '',
+      claim,
+      '',
+      `- proposal: ${proposalIdValue}`,
+      `- source: ${entry.source ?? 'journal'}${entry.lineStart ? `:${entry.lineStart}-${entry.lineEnd}` : ''}`,
+      `- accepted_at: ${now.toISOString()}`,
+    ].join('\n');
+    card = writeCard(root, {
+      rel,
+      title,
+      body,
+      fields: {
+        date: entry.day ?? dayString(now),
+        tags: ['consolidation'],
+        salience: Number.isInteger(entry.salience) ? entry.salience : 3,
+      },
+      extras: {
+        consolidation_proposal: proposalIdValue,
+        source_journal: entry.source ?? '',
+        source_lines: entry.lineStart ? `${entry.lineStart}-${entry.lineEnd}` : '',
+      },
+    }, { now });
+    entries[index] = { ...entry, status: 'accepted', resolvedAt: now.toISOString(), card: rel };
+  } else {
+    const reason = collapse(args.reason ?? '').slice(0, 300);
+    if (reason === '') throw memoryError('E_BAD_ARGUMENT', 'reject 需要 reason');
+    entries[index] = { ...entry, status: 'rejected', resolvedAt: now.toISOString(), reason };
+  }
+  const lastConsolidated = advanceLastConsolidated(state, entries);
+  updateState(root, {
+    seenProposals: entries,
+    ...(lastConsolidated !== lastDayOf(state.lastConsolidated) ? { lastConsolidated } : {}),
+  }, { now });
+  const actionName = action === 'accept' ? 'memory_consolidate_accept' : 'memory_consolidate_reject';
+  audited = appendAudit(root, {
+    action: actionName,
+    object: proposalIdValue,
+    result: action === 'accept'
+      ? `card=${card.rel}`
+      : `reason=${collapse(args.reason ?? '').slice(0, 200)}`,
+    now,
+  });
+  const backlog = proposalBacklog(entries);
+  return {
+    ok: true,
+    status: action,
+    proposalId: proposalIdValue,
+    card: card ? { rel: card.rel, sha256: card.sha256 ?? null } : null,
+    reason: action === 'reject' ? collapse(args.reason ?? '') : null,
+    lastConsolidated,
+    backlog,
+    audit: audited,
+    message: `${action === 'accept' ? '已接受' : '已拒绝'}提案 ${proposalIdValue}；积压 ${backlog.pending} 条，lastConsolidated=${lastConsolidated ?? 'null'}`,
+  };
+}
+
 /**
  * memory_consolidate: read-only with respect to cards. Writes exactly one
  * report file; the state file gains new `seenProposals` entries and, only when
@@ -484,6 +611,22 @@ function lastDayOf(value) {
 export function memoryConsolidate(args = {}, config = {}) {
   if (args.apply === true) {
     throw memoryError('E_READ_ONLY', 'memory_consolidate 只出提案，不支持 apply — 请人工决定后再改卡');
+  }
+  if (args.action === 'accept' || args.action === 'reject') return resolveConsolidationProposal({ ...args, proposalId: args.proposalId ?? args.id }, config);
+  if (args.action === 'status') {
+    const statusRoot = memoryRootFromConfig(config);
+    const statusState = readState(statusRoot);
+    return {
+      ok: true,
+      status: 'backlog',
+      readOnly: true,
+      root: statusRoot,
+      backlog: proposalBacklog(statusState.seenProposals),
+      lastConsolidated: statusState.lastConsolidated ?? null,
+    };
+  }
+  if (args.action !== undefined && args.action !== 'report') {
+    throw memoryError('E_BAD_ARGUMENT', `memory_consolidate 不支持的 action：${JSON.stringify(args.action)}`);
   }
   const root = memoryRootFromConfig(config);
   const now = config.now instanceof Date ? config.now : new Date();
@@ -596,6 +739,7 @@ export function memoryConsolidate(args = {}, config = {}) {
   const candidateDay = [...scannedDays].sort().pop() ?? null;
   const currentLastDay = lastDayOf(state.lastConsolidated);
   const allEntries = [...seenProposals, ...newEntries];
+  const backlog = proposalBacklog(allEntries);
   let lastConsolidated = state.lastConsolidated ?? null;
   let stateUpdated = false;
   if (candidateDay) {
@@ -619,10 +763,10 @@ export function memoryConsolidate(args = {}, config = {}) {
   const dir = reportsDir(root);
   ensureDir(root, dir);
   const reportPath = resolveInside(root, path.join('.longlive', 'reports', `consolidate-${day}.md`));
-  const content = reportText({
+  const content = `${reportText({
     root, sinceDay, files, proposals, undated, badAffect, duplicates,
     stateUpdated, lastConsolidated: lastDayOf(lastConsolidated) ?? lastConsolidated,
-  });
+  })}\n- 提案积压：${backlog.pending} 待决 / ${backlog.total} 总数（accepted ${backlog.accepted}, rejected ${backlog.rejected}）\n`;
   if (fs.existsSync(reportPath)) {
     const backupDir = resolveInside(root, path.join('.longlive', 'reports', '.backups'));
     ensureDir(root, backupDir);
@@ -653,6 +797,7 @@ export function memoryConsolidate(args = {}, config = {}) {
     duplicatesSuppressed: duplicates,
     lockedSkipped,
     seenProposals: allEntries.length,
+    backlog,
     badAffect,
     undated,
     reportPath,

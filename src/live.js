@@ -51,7 +51,9 @@ import {
 
 export const LIVE_SCHEMA_VERSION = 1;
 export const LIVE_DIR = path.join('.longlive', 'live');
+export const LIVE_TOMBSTONE_FILE = 'tombstones.jsonl';
 export const LIVE_CONFIRM = 'PRUNE';
+export const LIVE_SWEEP_CONFIRM = 'SWEEP';
 export const GOAL_MAX_CHARS = 80;
 export const DEFAULT_TTL_MS = 60_000;
 export const MIN_TTL_MS = 1_000;
@@ -256,6 +258,111 @@ export function liveFile(root, sessionId) {
   const file = resolveInside(root, path.join(LIVE_DIR, `${id}.json`));
   assertRealInside(root, file, '活体记录');
   return file;
+}
+
+/** Append-only tombstone/audit ledger for removed or swept L1 rows. */
+export function liveTombstoneFile(root) {
+  return resolveInside(root, path.join(LIVE_DIR, LIVE_TOMBSTONE_FILE));
+}
+
+function appendLiveTombstones(root, rows, now) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  const file = liveTombstoneFile(root);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const at = isoTime(typeof now === 'number' ? now : Date.now());
+  const written = [];
+  const lines = rows.map((row) => {
+    const entry = {
+      schema: 'live-tombstone/v1',
+      at,
+      sessionId: row.sessionId ?? null,
+      effectiveState: row.effectiveState ?? null,
+      reason: row.reason ?? 'dead-row-cleanup',
+      heartbeatAt: row.heartbeatAt ?? null,
+      ttlMs: row.ttlMs ?? null,
+      heartbeatAgeMs: row.heartbeatAgeMs ?? null,
+      host: row.host ?? null,
+      sha256: row.sha256 ?? null,
+      fileRel: row.fileRel ?? null,
+      row: row.row ?? null,
+    };
+    written.push(entry);
+    return JSON.stringify(entry);
+  });
+  fs.appendFileSync(file, `${lines.join('\n')}\n`, 'utf8');
+  return written;
+}
+
+/** Read-only health snapshot: stale/dead counts + tombstone backlog. */
+export function liveHealth(rootOrConfig, config = {}) {
+  const root = typeof rootOrConfig === 'string' ? rootOrConfig : memoryRootFromConfig(rootOrConfig ?? config);
+  const now = typeof rootOrConfig === 'string' ? nowMs(config) : nowMs(rootOrConfig ?? config);
+  const listed = liveList({ includeDead: true }, { memoryRoot: root, now });
+  const entries = Array.isArray(listed.entries) ? listed.entries : [];
+  const stale = entries.filter((entry) => entry.effectiveState === 'stale');
+  const dead = entries.filter((entry) => entry.effectiveState === 'dead');
+  let tombstones = 0;
+  try {
+    const text = fs.readFileSync(liveTombstoneFile(root), 'utf8');
+    tombstones = text.split('\n').filter((line) => line.trim() !== '').length;
+  } catch { /* no ledger yet */ }
+  return {
+    ok: true,
+    root,
+    dir: listed.dir,
+    total: entries.length,
+    active: entries.filter((entry) => ['idle', 'running', 'waiting', 'blocked'].includes(entry.effectiveState)).length,
+    stale: stale.length,
+    dead: dead.length,
+    corrupt: entries.filter((entry) => entry.effectiveState === 'corrupt').length,
+    tombstoned: tombstones,
+    staleIds: stale.map((entry) => entry.sessionId),
+    deadIds: dead.map((entry) => entry.sessionId),
+  };
+}
+
+/**
+ * Startup-safe sweep: mark stale in the health view and move dead same-host
+ * rows to the append-only tombstone ledger before unlinking them. Remote rows
+ * are never swept; dry-run is the default.
+ */
+export function liveSweep(args = {}, config = {}) {
+  const root = memoryRootFromConfig(config);
+  const now = nowMs(config);
+  const real = args.confirm === LIVE_SWEEP_CONFIRM || args.autoCleanup === true;
+  const health = liveHealth(root, { now });
+  const listed = liveList({ includeDead: true }, { memoryRoot: root, now });
+  const entries = Array.isArray(listed.entries) ? listed.entries : [];
+  const candidates = entries.filter((entry) => entry.effectiveState === 'dead' && entry.sameHost === true && entry.file);
+  const removed = [];
+  const tombstoned = [];
+  if (real) {
+    for (const entry of candidates) {
+      let text = '';
+      let sha = null;
+      try {
+        const bytes = fs.readFileSync(entry.file);
+        text = bytes.toString('utf8');
+        sha = crypto.createHash('sha256').update(bytes).digest('hex');
+      } catch { continue; }
+      const row = { ...entry, sha256: sha };
+      try { tombstoned.push(...appendLiveTombstones(root, [row], now)); } catch { continue; }
+      try {
+        fs.unlinkSync(entry.file);
+        removed.push(entry.sessionId);
+      } catch { /* tombstone is already durable; report as not removed */ }
+    }
+  }
+  return {
+    ok: true,
+    status: real ? 'swept' : 'dry-run',
+    dryRun: !real,
+    confirmRequired: LIVE_SWEEP_CONFIRM,
+    ...health,
+    candidates: candidates.map((entry) => entry.sessionId),
+    removed,
+    tombstoned: tombstoned.length,
+  };
 }
 
 // --------------------------------------------------------------------- write
@@ -1300,6 +1407,7 @@ export function livePrune(args = {}, config = {}) {
       wouldDelete,
       deleted: [],
       failed: [],
+      tombstoned: [],
       skipped: [
         ...protectedRows.map((candidate) => ({
           ...candidate,
@@ -1321,6 +1429,7 @@ export function livePrune(args = {}, config = {}) {
 
   const deleted = [];
   const failed = [];
+  const tombstoned = [];
   const skipped = [
     ...protectedRows.map((candidate) => ({
       ...candidate,
@@ -1376,6 +1485,11 @@ export function livePrune(args = {}, config = {}) {
       }
     }
     try {
+      // Archive first: a crash between tombstone and unlink leaves a replayable
+      // audit row; a crash before tombstone leaves the row untouched.
+      try {
+        tombstoned.push(...appendLiveTombstones(root, [{ ...candidate, sha256: sha256Text(text) }], now));
+      } catch { /* the row is still recoverable from its file */ }
       fs.unlinkSync(candidate.file);
       deleted.push(candidate);
     } catch (error) {
@@ -1459,6 +1573,7 @@ export function livePrune(args = {}, config = {}) {
     wouldDelete: [],
     deleted,
     failed,
+    tombstoned,
     skipped,
     placeholders,
     tmpFiles,

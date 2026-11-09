@@ -10,7 +10,7 @@
 // 去重规则：id 第一次出现者胜；后出现的重复 id 被忽略，并在 read().duplicates
 // 里留下证据。append 遇到已存在 id 返回 {ok:false, code:'E_DUPLICATE'}，不写盘。
 //
-// 容量上限（评审 P29）：800 条任务曾被无条件收下。现在 append 前同时检查
+// 容量上限（复核 P29）：800 条任务曾被无条件收下。现在 append 前同时检查
 // maxTasks / maxBytes，超了返回 E_QUEUE_FULL 且不写盘。id 缓存带文件签名
 // （size+mtime），别的实例追加后本实例会重扫，避免拿过期缓存写出重复 id（P28）。
 

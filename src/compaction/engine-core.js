@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { memoryRootFromConfig } from '../memory/paths.js';
+import { appendHotTruncateDiag, hotTruncateDiagOptions } from '../hot-truncate-diag.js';
 
 /** Provider name recorded on every summary event this engine writes. */
 export const PROVIDER = 'hot-truncate';
@@ -42,7 +43,7 @@ export const DEFAULT_OPTIONS = Object.freeze({
   retainTurns: 4,
   retainTokens: 8000,
   minCutTokens: 0,
-  autoMinTokens: 300000,
+  autoMinTokens: 350000,
   archiveDir: '',
   memoryRoot: '',
   memRoot: '',
@@ -1053,6 +1054,47 @@ export function createCutEngine(deps) {
       let started = false;
       let closed = false;
       let archive = null;
+      // 1.8.1-rc.7 audit P1-6: one durable diag row per hot-truncate archive.
+      // The old path wrote only the pointer/log line; an archive without a
+      // matching diag row was indistinguishable from an archive that never
+      // happened when a later surface append failed.
+      const diagStartedAt = Date.now();
+      let diagRoot = this.options.memoryRoot || this.options.memRoot || '';
+      let diagDone = false;
+      let archiveWritten = false;
+      const emitHotTruncateDiag = (result, extra = {}) => {
+        if (!diagRoot || diagDone) return;
+        diagDone = true;
+        try {
+          const written = appendHotTruncateDiag(diagRoot, {
+            sessionId: String(session.id ?? ''),
+            turn: Number.isInteger(openTurn) ? openTurn : null,
+            plannedCut: {
+              startSeq: plan.start,
+              endSeq: plan.end,
+              cutTurns: plan.cutTurns.map((entry) => entry.turn),
+              firstTurn: plan.cutTurns[0]?.turn ?? null,
+              lastTurn: plan.cutTurns[plan.cutTurns.length - 1]?.turn ?? null,
+            },
+            retainTurns: this.options.retainTurns,
+            retainTokens: this.options.retainTokens,
+            tokensBefore: plan.shadowedTokenCount + plan.retainedTokens,
+            tokensCut: plan.shadowedTokenCount,
+            tokensAfter: plan.retainedTokens,
+            archivePath: archive?.path ?? null,
+            archiveWritten,
+            archiveBytes: archive?.path ? (() => { try { return fs.statSync(archive.path).size } catch { return null } })() : null,
+            archiveEvents: archive?.eventCount ?? null,
+            cutTurnCount: plan.cutTurns.length,
+            result,
+            ...extra,
+            durationMs: Math.max(0, Date.now() - diagStartedAt),
+          }, hotTruncateDiagOptions({}));
+          if (!written.ok) this.log('warn', `hot-truncate diag write failed: ${written.error ?? 'unknown'}`);
+        } catch (error) {
+          this.log('warn', `hot-truncate diag threw: ${error?.message ?? error}`);
+        }
+      };
       try {
         // A whole completed turn is balanced by construction, but the host's
         // own predicate is the authority — a corrupt surface must stop the cut
@@ -1063,6 +1105,15 @@ export function createCutEngine(deps) {
           if (before !== true || after !== true) throw new Error('hot-truncate: selected cut is not tool-pairing balanced');
         }
         const dir = resolveArchiveDir(this.options, env);
+        if (!diagRoot) {
+          // The shipped compaction row (cordis.patch.yml) does not repeat
+          // memoryRoot; resolveArchiveDir has already chosen the real store.
+          // Recover it from the standard <root>/.longlive/hot-truncate layout.
+          const parent = path.dirname(dir);
+          if (path.basename(dir) === 'hot-truncate' && path.basename(parent) === '.longlive') {
+            diagRoot = path.dirname(parent);
+          }
+        }
         archive = archiveWriter({
           dir,
           table: turnTable(session),
@@ -1072,6 +1123,7 @@ export function createCutEngine(deps) {
           now: Date.now(),
         });
         if (!archive || typeof archive.path !== 'string') throw new Error('hot-truncate: archive writer returned no path');
+        archiveWritten = true;
         const facts = {
           totalTurns: plan.totalTurns,
           archivedTurns: plan.archivedTurns,
@@ -1136,6 +1188,7 @@ export function createCutEngine(deps) {
         }
         this.log('info', `hot-truncate: 切掉第 ${plan.cutTurns[0].turn}–${plan.cutTurns[plan.cutTurns.length - 1].turn} 轮，`
           + `${plan.shadowedSeqs.length} 事件 / ${plan.shadowedTokenCount} tokens，原文 ${archive.eventCount} 条 → ${archive.path}`);
+        emitHotTruncateDiag('ok');
         return {
           compactionId,
           ...(sourceCommandId === undefined ? {} : { sourceCommandId }),
@@ -1156,6 +1209,9 @@ export function createCutEngine(deps) {
             // the stock backend; the next cut refuses until a seed boundary.
           }
         }
+        emitHotTruncateDiag('fail', {
+          failReason: `${error?.code ?? 'HOT_TRUNCATE_FAILED'}: ${error?.message ?? String(error)}`,
+        });
         throw error;
       } finally {
         this.active.delete(key);

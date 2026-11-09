@@ -1,7 +1,7 @@
 // src/ui/routes-readonly.js — M2-F 面板只读数据面（16 条 /api/longlive/*）
 //
 // 契约（MEMORY-RECALL-V2-PROPOSAL v2.6.3 §12.3 / §12.7-G2/G3/G4 / §12.11-R9）：
-//   16 条只读路由，全部过同一道能力令牌门（panel-auth），面板只走 HTTP、
+//   22 条只读路由，全部过同一道能力令牌门（panel-auth），面板只走 HTTP、
 //   不直连 SQLite、不读 `.longlive/` 之外的路径。
 //   #16 GET /api/longlive/integrity 返回 R8 manifest 校验状态；ok=false 时
 //   **只读展示保留**，动作面由 actions.js 判 401 E_PANEL_INTEGRITY。
@@ -19,6 +19,7 @@ import { readEvidenceChain } from '../memory/evidence-chain.js';
 import { listBanks, readClaims } from '../memory/governance.js';
 import { appendAuditRecord, normalizeAuditRecordRow } from '../memory/audit-records.js';
 import { readPrestepSummary } from '../metrics/store.mjs';
+import { readRecallLogRows, summarizeRecallRows } from '../recall/explain.mjs';
 import { readChannels } from '../role/channels.js';
 import { readAttentionView, readPersonalityView, readRelationshipsView } from '../role/readers.js';
 
@@ -178,7 +179,8 @@ function createDefaultReaders(options) {
   // §16.8 A：角色层 HMAC 侧车可能由 panel auditKey 或 host key file 任一写成；
   // 路由读透传宿主 auditKey（缺省走 key file），校验失败时 fail-safe 降级。
   const auditKey = options.auditKey ?? null;
-  const now = options.now;
+  // S3：/status 与 /write-health 的 24h 汇总需要一个时钟；宿主未注入时用当前时间兜底。
+  const now = typeof options.now === 'function' ? options.now : () => new Date();
   const base = path.join(String(memoryRoot ?? ''), '.longlive');
   return {
     flags: () => (typeof options.flagsSnapshot === 'function'
@@ -196,7 +198,30 @@ function createDefaultReaders(options) {
     },
     status: () => {
       const rows = listLiveRows(memoryRoot);
-      return { schema: 'status/v1', present: rows.length > 0, sessions: rows, counts: { sessions: rows.length } };
+      // 1.8.1-rc.7: reveal the auto-truncation health fields next to the live
+      // sessions, so an existing panel/STATUS reader sees mode=dryrun, over
+      // count/max sample and the most recent error/infeasible without a new
+      // route. A missing/corrupt file is an empty state, never an exception.
+      let autoTruncate = null;
+      let engineMismatch = null;
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(memoryRoot, '.longlive', 'status.json'), 'utf8'));
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+          autoTruncate = raw.autoTruncate ?? null;
+          engineMismatch = raw.engineMismatch ?? null;
+        }
+      } catch { /* absent/corrupt -> null; the live rows are still useful */ }
+      // S3：面板 /status 可直接读到「最近 24h 各 why 计数」，不再只能看空注入数。
+      const recall = readRecallLogRows({ memoryRoot });
+      return {
+        schema: 'status/v1',
+        present: rows.length > 0 || autoTruncate !== null,
+        sessions: rows,
+        counts: { sessions: rows.length },
+        autoTruncate,
+        engineMismatch,
+        recallExplain: summarizeRecallRows(recall.rows, { now: now() }),
+      };
     },
     live: () => {
       const rows = listLiveRows(memoryRoot);
@@ -238,15 +263,29 @@ function createDefaultReaders(options) {
     },
     recallLog: (query) => {
       const limit = Number.isInteger(query.limit) ? Math.min(Math.max(query.limit, 1), LOG_LIMIT_MAX) : LOG_LIMIT_MAX;
-      const read = readJsonlLimited(path.join(base, 'recall', 'log.jsonl'), limit);
-      return { schema: 'recall-log/v1', present: read.present, entries: read.rows, badLines: read.bad };
+      // S3：读 auto-recall 实际写入的 .longlive/recall-log.jsonl（旧位置 recall/log.jsonl 仅回退），
+      // 并附最近 24h why 汇总；行数仍受 limit 截断，汇总基于全量。
+      const read = readRecallLogRows({ memoryRoot });
+      const entries = read.rows.slice(-limit);
+      return {
+        schema: 'recall-log/v1',
+        present: read.present,
+        entries,
+        badLines: read.bad,
+        path: read.path,
+        legacyPath: read.legacyPath,
+        summary: summarizeRecallRows(read.rows, { now: now() }),
+      };
     },
     writeHealth: () => {
       // B3: pre-step latency attribution lives next to write-health (read-only summary).
       const prestep = readPrestepSummary({ memoryRoot });
+      // S3：健康输出带召回可解释性汇总（策略跳过 / 零命中 / 失败分开计数）。
+      const recall = readRecallLogRows({ memoryRoot });
+      const recallExplain = summarizeRecallRows(recall.rows, { now: now() });
       const read = readJson(path.join(base, 'metrics', 'write-health.json'));
-      if (!read.ok) return { schema: 'write-health/v1', present: false, code: read.code, prestep };
-      return { schema: 'write-health/v1', present: true, ...read.value, prestep };
+      if (!read.ok) return { schema: 'write-health/v1', present: false, code: read.code, prestep, recallExplain };
+      return { schema: 'write-health/v1', present: true, ...read.value, prestep, recallExplain };
     },
     review: () => {
       const read = readJsonlLimited(path.join(base, 'review', 'queue.jsonl'), 500);

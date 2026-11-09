@@ -11,7 +11,7 @@
 //   - guard() 是同步检查，返回字符串即拒绝；全局 guard 先跑，然后 agent 链
 //     由远及近（guardReason :3020-3028）。
 //
-// 评审 P0-1 的教训：旧实现要求 `Array.isArray(tools.restrictableNames)`，
+// 复核 P0-1 的教训：旧实现要求 `Array.isArray(tools.restrictableNames)`，
 // 在真宿主上 100% 抛 E_TOOL_SURFACE。现在的顺序是：
 //   1. 优先从 view(scope).restrictableNames（Set）枚举；
 //   2. 退回旧形状的 service.restrictableNames（Array 或 Set）；

@@ -42,12 +42,16 @@ param(
     [string]$Profile = 'desktop',
     [string]$LogDir = '',
     [string]$SessionsRoot = '',
+    [long]$LogMaxBytes = 8388608,
+    [int]$LogMaxFiles = 5,
     [switch]$DryRun,
     [switch]$SimulateCloseFailure
 )
 
 $ErrorActionPreference = 'Stop'
 $script:ExeName = ''
+$script:LogMaxBytes = [Math]::Max([long]65536, [long]$LogMaxBytes)
+$script:LogMaxFiles = [Math]::Max(1, [int]$LogMaxFiles)
 
 # rc.6 (R4-03): capture every native node process as UTF-8, independent of the
 # console code page. On a Chinese Windows the host console is GBK; letting the
@@ -81,15 +85,52 @@ function Quote-NativeArg([string]$Value) {
     return $sb.ToString()
 }
 
+function Rotate-JsonlLogIfNeeded([string]$Path) {
+    # 1.8.1-rc.7: the runner appends RESULT lines to auto-truncate.log directly,
+    # so the in-plugin rotation alone would leave this writer unbounded. Keep the
+    # same simple policy as src/log-rotation.js: size, local day, max files.
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    try {
+        $item = Get-Item -LiteralPath $Path
+        $today = (Get-Date).Date
+        $tooBig = $item.Length -ge $script:LogMaxBytes
+        $oldDay = $item.Length -gt 0 -and $item.LastWriteTime.Date -lt $today
+        if (-not $tooBig -and -not $oldDay) { return }
+        $dir = Split-Path -Parent $Path
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($Path)
+        $ext = [System.IO.Path]::GetExtension($Path)
+        $stamp = (Get-Date).ToString('yyyyMMdd-HHmmss')
+        $target = Join-Path $dir "$name.$stamp$ext"
+        $n = 1
+        while (Test-Path -LiteralPath $target) {
+            $target = Join-Path $dir "$name.$stamp-$n$ext"
+            $n += 1
+        }
+        Move-Item -LiteralPath $Path -Destination $target
+        $rotated = @(Get-ChildItem -LiteralPath $dir -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$name.*$ext" -and $_.FullName -ne $target } |
+            Sort-Object LastWriteTime -Descending)
+        for ($i = 0; $i -lt $rotated.Count; $i += 1) {
+            if ($i -ge ($script:LogMaxFiles - 1)) {
+                Remove-Item -LiteralPath $rotated[$i].FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch {
+        # Diagnostics must never fail the runner.
+    }
+}
+
 function Write-Run([string]$Message) {
     $ts = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss.fffzzz')
     $line = "[$ts] $Message"
+    Rotate-JsonlLogIfNeeded $script:RunLog
     Add-Content -LiteralPath $script:RunLog -Value $line -Encoding UTF8
     Write-Host $line
 }
 
 function Write-Result($Value) {
     $json = $Value | ConvertTo-Json -Compress -Depth 10
+    Rotate-JsonlLogIfNeeded $script:ResultLog
     Add-Content -LiteralPath $script:ResultLog -Value $json -Encoding UTF8
     Write-Run "RESULT $json"
 }

@@ -13,6 +13,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { appendJsonLine } from '../util/append-store.js';
+
 export const PRESTEP_LATENCY_SCHEMA = 'prestep-latency/v1';
 export const PRESTEP_SUMMARY_SCHEMA = 'prestep-summary/v1';
 export const PRESTEP_FILE_NAME = 'prestep.jsonl';
@@ -220,12 +222,16 @@ export function finalizePrestepTurn(sessionId, turn, options = {}) {
   };
   const file = prestepFile(typeof options.memoryRoot === 'string' && options.memoryRoot.trim() !== '' ? options.memoryRoot : state.memoryRoot);
   if (file === '') return null;
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.appendFileSync(file, `${JSON.stringify(row)}\n`, 'utf8');
-  } catch {
-    return null;
-  }
+  const healthRoot = typeof options.memoryRoot === 'string' && options.memoryRoot.trim() !== '' ? options.memoryRoot : state.memoryRoot;
+  const written = appendJsonLine({
+    file,
+    row,
+    label: 'metrics.prestep',
+    healthRoot,
+    now: () => state.now(),
+    quarantineDir: path.join(String(healthRoot ?? ''), '.longlive', 'quarantine'),
+  });
+  if (!written.ok) return null;
   return row;
 }
 

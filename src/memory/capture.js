@@ -17,11 +17,13 @@ import path from 'node:path';
 import { parseSession, stableStringify } from '../codec.js';
 import { makeSessionTurnAnchor, turnDigest } from './anchors.js';
 import { appendClaimFromRecord } from './governance.js';
-import { appendAutoCards } from './auto-cards.js';
 import { evaluateEvidenceForWrite, evidenceFromAnchors } from './records.js';
 import { extractTurns, openEventIndex } from './event-index.js';
 import { acquireLease, releaseLease } from './lock.js';
 import { createWal } from './wal.js';
+import { memoryIndex } from './index.js';
+import { refreshIndexAfterCapture } from './index-freshness.js';
+import { updateState } from './state.js';
 
 export const RECORDS_SCHEMA = 'records/v1';
 
@@ -191,19 +193,33 @@ export function createCapture(options = {}) {
           }
           return { inserted, skipped: selected.length - inserted };
         });
-        // 1.8.0: every captured turn gets one deterministic AutoCard pointing
-        // back at the exact session turn. Idempotent by EventRecord.id.
-        const cards = appendAutoCards({ memoryRoot, records: selected, now, skipLock: true });
-        wal.markDone(walId, { inserted: result.inserted, cards: cards.written });
+        // 1.8.2 D1: AutoCards are no longer written (cold archive; cards.jsonl
+        // is read-only legacy data). Keep the return fields as constant 0/null
+        // so existing callers do not need a new branch.
+        const cards = { written: 0, skipped: 0, file: null };
+        const capturedAt = nowDate(now);
+        // Refresh INDEX.md + the freshness ledger after every successful capture.
+        // The writer is idempotent (`ifChanged`) and failures are recorded in
+        // memory-state, not thrown into the host turn.
+        let indexRefresh;
+        try {
+          updateState(memoryRoot, { lastCaptureAt: capturedAt.toISOString() }, { now: capturedAt });
+          indexRefresh = refreshIndexAfterCapture({ memoryRoot, now: capturedAt, indexer: memoryIndex });
+        } catch (error) {
+          indexRefresh = { ok: false, error, failure: { code: error?.code ?? 'E_INDEX_REFRESH' } };
+        }
+        wal.markDone(walId, { inserted: result.inserted, cards: 0, indexRefresh: indexRefresh?.ok === true });
         return {
           ok: true,
           sessionId,
           logFile,
           turns: selected.length,
           ...result,
-          cardsWritten: cards.written,
-          cardsSkipped: cards.skipped,
-          cardsFile: cards.file,
+          cardsWritten: 0,
+          cardsSkipped: 0,
+          cardsFile: null,
+          indexRefresh,
+          indexFreshness: indexRefresh?.freshness ?? null,
           walId,
         };
       } catch (error) {
@@ -390,10 +406,9 @@ export function createCapture(options = {}) {
           index.upsertEvent(record, { source: record.source });
         }
       });
-      // W1: the index may already have the EventRecord while the card write was
-      // lost; replay must backfill AutoCards too (eventId-idempotent).
-      const cards = appendAutoCards({ memoryRoot, records: selected, now, skipLock: true });
-      return cards;
+      // 1.8.2 D1: WAL replay no longer backfills AutoCards; the legacy
+      // cards.jsonl archive stays read-only. Return shape stays compatible.
+      return { written: 0, skipped: 0, file: null };
     };
     const results = wal.replay((entry) => { handleEntry(entry); });
     // W2: a failed intent is retried once, then left failed with an audit row

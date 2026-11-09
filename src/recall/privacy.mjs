@@ -13,7 +13,7 @@
  * 命中口径 = 隐私门的 verdict==='local_only' **或** 核心兜底正则命中（取并集，宁可多拦）。
  * 兜底分两类：
  *   - PII：手机号 / 邮箱 / 身份证（1.6.7 起就有）；
- *   - 密钥/令牌（1.6.8 评审 S3 补）：sk-*、Bearer …、*_API_KEY=*、token=/secret=/password=、
+ *   - 密钥/令牌（1.6.8 复核 S3 补）：sk-*、Bearer …、*_API_KEY=*、token=/secret=/password=、
  *     私钥头、AWS/GitHub/Slack 凭证前缀。活动板是跨会话共享的，
  *     手机号只泄漏一个人的联系方式，密钥泄漏的是账号本身。
  *

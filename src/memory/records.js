@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { isNegativeConclusion } from './cards.js';
+import { appendJsonLine } from '../util/append-store.js';
 
 export const RECORDS_SCHEMA = 'records/v1';
 export const SOURCE_TIERS = Object.freeze(['user', 'host', 'agent', 'plugin']);
@@ -290,7 +291,7 @@ export function listRecords({ memoryRoot, limit = 200 } = {}) {
   };
 }
 
-/** Append one audit line (one per recall/evidence call). */
+/** Append one audit line (one per recall/evidence call). Never throws. */
 export function appendRecallAudit({ memoryRoot, now = () => new Date(), query = '', recordId = null, recordIds = [], hit = false, conflicts = [], timings = null, source = 'records-query', extra = {} } = {}) {
   const value = typeof now === 'function' ? now() : new Date();
   const at = (value instanceof Date ? value : new Date(value)).toISOString();
@@ -306,9 +307,16 @@ export function appendRecallAudit({ memoryRoot, now = () => new Date(), query = 
     timings: timings && typeof timings === 'object' ? timings : null,
     ...extra,
   };
-  fs.mkdirSync(path.dirname(recallLogPathOf(memoryRoot)), { recursive: true });
-  fs.appendFileSync(recallLogPathOf(memoryRoot), `${JSON.stringify(line)}\n`, 'utf8');
-  return { ok: true, line, file: recallLogPathOf(memoryRoot) };
+  const file = recallLogPathOf(memoryRoot);
+  const written = appendJsonLine({
+    file,
+    row: line,
+    label: 'recall-log',
+    healthRoot: memoryRoot,
+    now: typeof now === 'function' ? now : undefined,
+    quarantineDir: path.join(path.resolve(String(memoryRoot ?? '')), '.longlive', 'quarantine'),
+  });
+  return { ok: written.ok, line, file, bytes: written.bytes, code: written.code, error: written.error };
 }
 
 function queryTokens(query) {

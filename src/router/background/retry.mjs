@@ -101,7 +101,7 @@ const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWr
 
 /**
  * 累加每一次 attempt 的 usage —— 包括最终失败的那一次。
- * 评审 P26：第一次 attempt 花了 60 后 SERVER 失败，第二次花 30，旧实现只记 30；
+ * 复核 P26：第一次 attempt 花了 60 后 SERVER 失败，第二次花 30，旧实现只记 30；
  * provider 已经计费 90，预算必须按 90 扣。
  */
 export function addUsage(total, usage) {

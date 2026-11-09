@@ -31,6 +31,7 @@ import { buildStatus, KNOWN_WARNING_CODES, writeStatus } from './status.mjs';
 import { createBoardBuilder, listSessionMetadata } from './board.mjs';
 import { createHintInjector } from './hint.mjs';
 import { createLiveWriter, scanLiveRows, sessionIdOf, stateForTurnEnd } from './live.mjs';
+import { liveSweep, liveHealth } from '../../live.js';
 import { createProposalEngine } from './proposals.mjs';
 import { createApplier } from './apply.mjs';
 import { clampLeaseTtl, computeMaxHoldMs, createWriterLease } from './lease.mjs';
@@ -981,6 +982,16 @@ export class RouterService {
       this.liveWriter = null;
       this.#log('warn', `live writer init failed: ${errorMessage(error)}`);
     }
+    // Startup sweep: dead same-host rows (>4x ttl) move to the tombstone ledger
+    // before removal; stale rows stay visible in health/status.
+    try {
+      const swept = liveSweep({ autoCleanup: true }, { memoryRoot: this.paths.liveRoot, now: this.#now() });
+      this.liveSweepInfo = { stale: swept.stale, dead: swept.dead, removed: swept.removed.length, tombstoned: swept.tombstoned };
+      if (swept.removed.length > 0) this.#auditSafe('live.sweep', { removed: swept.removed.length, stale: swept.stale, dead: swept.dead });
+    } catch (error) {
+      this.liveSweepInfo = null;
+      this.#log('warn', `live startup sweep failed: ${errorMessage(error)}`);
+    }
     try {
       this.boardBuilder = createBoardBuilder({
         memoryRoot: this.paths.liveRoot,
@@ -1145,6 +1156,8 @@ export class RouterService {
       return null;
     }
     this.boardSnapshot = snapshot;
+    let liveHealthInfo = null;
+    try { liveHealthInfo = liveHealth(this.paths.liveRoot, { now: this.#now() }); } catch { liveHealthInfo = null; }
     this.liveInfo = {
       ...this.liveInfo,
       rows: snapshot.live.rows,
@@ -1152,6 +1165,12 @@ export class RouterService {
       unknown: snapshot.live.unknown,
       corrupt: snapshot.live.corrupt,
       saturated: snapshot.live.saturated,
+      ...(liveHealthInfo ? {
+        active: liveHealthInfo.active,
+        stale: liveHealthInfo.stale,
+        dead: liveHealthInfo.dead,
+        tombstoned: liveHealthInfo.tombstoned,
+      } : {}),
       createdEventVia: this.liveCreatedEventVia,
       turnEndEventVia: this.liveTurnEndEventVia,
     };

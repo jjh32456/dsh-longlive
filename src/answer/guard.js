@@ -40,7 +40,7 @@ export const RULE_TEXT = [
 
 /**
  * M1.5 文本层硬规则（仅在 gate.enabled=true 时追加；默认关时系统提示逐字节不变）。
- * 评审归因：无证据仍答 + 伪造来源靠事后审计改不了模型行为，必须把判定写死在注入里。
+ * 复核归因：无证据仍答 + 伪造来源靠事后审计改不了模型行为，必须把判定写死在注入里。
  */
 export const GATE_RULE_TEXT = [
   '【有据才答·信心闸·硬规则（本轮生效）】',
@@ -1171,7 +1171,7 @@ export function auditTurn(input = {}) {
 
   // 信心闸闭环：判定应弃答却输出事实断言 / 应降级却没有首句标注。
   // R3 评分安全：gate 违规只算 unsupported（评分器只把 fabrication 计幻觉），
-  // 否则「本该弃答却答」会被评分污染成幻觉（评审模拟 12→31）。
+  // 否则「本该弃答却答」会被评分污染成幻觉（复核模拟 12→31）。
   if (gate && gate.mode === 'abstain' && !checks.abstained) {
     add(
       'GATE_ABSTAIN_VIOLATION',

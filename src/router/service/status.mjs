@@ -312,6 +312,12 @@ function normalizeLive(input) {
   if (isObject(input.live)) {
     out.corrupt = finiteInt(live.corrupt);
     out.saturated = live.saturated === true;
+    // S4: stale/dead/active visibility. Only present when reported by the
+    // caller, so a minimal v2 status stays byte-identical.
+    out.active = finiteInt(live.active);
+    out.stale = finiteInt(live.stale);
+    out.dead = finiteInt(live.dead);
+    out.tombstoned = finiteInt(live.tombstoned);
     // Which host event shape actually drove the L1 write. null means "not
     // observed yet", never a silently assumed green channel.
     out.createdEventVia = via(live.createdEventVia ?? input.liveCreatedEventVia);

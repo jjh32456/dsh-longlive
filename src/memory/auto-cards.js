@@ -18,6 +18,7 @@ import path from 'node:path';
 import { openEventIndex } from './event-index.js';
 import { acquireLease, releaseLease } from './lock.js';
 import { resolveHostKey, readHostKey } from '../role/writeprotect.js';
+import { priorityFor } from './card-priority.js';
 
 export const AUTO_CARD_SCHEMA = 'auto-card/v1';
 export const CARDS_REL = path.join('.longlive', 'index', 'cards.jsonl');
@@ -28,6 +29,18 @@ let cache = null;
 
 export function cardsPathOf(memoryRoot) {
   return path.join(path.resolve(String(memoryRoot)), CARDS_REL);
+}
+
+/** Cheap count for INDEX/status surfaces (does not verify signatures). */
+export function countAutoCards(memoryRoot) {
+  try {
+    const raw = fs.readFileSync(cardsPathOf(memoryRoot), 'utf8');
+    let count = 0;
+    for (const line of raw.split('\n')) if (line.trim() !== '') count += 1;
+    return count;
+  } catch {
+    return 0;
+  }
 }
 
 function sha256Hex(text) {
@@ -64,6 +77,46 @@ export function signAutoCard(card, auditKey) {
 
 function oneLine(text, max = 160) {
   return String(text ?? '').replace(/\s+/gu, ' ').trim().slice(0, max);
+}
+
+/**
+ * S8: card terms = event terms + event topicPhrases (deduped, one line each,
+ * max 20). Old events have no topicPhrases, so old cards keep the same terms.
+ * Used by BOTH makeAutoCard and trustedCardFromEvent so the HMAC payload is
+ * re-derivable after an upgrade (old cards stay valid).
+ */
+export function mergedCardTerms(record) {
+  const source = [
+    ...(Array.isArray(record?.terms) ? record.terms : []),
+    ...(Array.isArray(record?.topicPhrases) ? record.topicPhrases : []),
+  ];
+  const out = [];
+  const seen = new Set();
+  for (const value of source) {
+    const term = oneLine(value, 40);
+    if (term === '' || seen.has(term)) continue;
+    seen.add(term);
+    out.push(term);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+/**
+ * S8: card title keeps the event summary; topicPhrases get a short prefix so a
+ * theme word survives the 80-char title cap. Old events (no topicPhrases)
+ * derive exactly the old title.
+ */
+export function cardTitleOf(record) {
+  const phrases = (Array.isArray(record?.topicPhrases) ? record.topicPhrases : [])
+    .map((phrase) => oneLine(phrase, 24))
+    .filter((phrase) => phrase !== '');
+  // 长短语（≥3 字）优先，避免「版本、简介」这类短噪音挤掉主题；最多 2 个。
+  const long = phrases.filter((phrase) => Array.from(phrase).length >= 3);
+  const short = phrases.filter((phrase) => Array.from(phrase).length < 3);
+  const picked = [...long, ...short].slice(0, 2);
+  const prefix = picked.length > 0 ? `${picked.join('、')}：` : '';
+  return oneLine(`${prefix}${record?.summary ?? ''}`, CARD_TITLE_MAX);
 }
 
 export function cardIdOf(eventId) {
@@ -105,10 +158,9 @@ export function makeAutoCard(record, { now = () => new Date(), auditKey = null }
   if (!Number.isInteger(record.turn) || record.turn < 1) return null;
   const atMs = Number.isFinite(record.timeEnd) ? record.timeEnd
     : (Number.isFinite(record.timeStart) ? record.timeStart : now().getTime());
-  const title = oneLine(record.summary, CARD_TITLE_MAX);
-  const terms = Array.isArray(record.terms)
-    ? [...new Set(record.terms.map((term) => oneLine(term, 40)).filter((term) => term !== ''))].slice(0, 20)
-    : [];
+  const title = cardTitleOf(record);
+  const terms = mergedCardTerms(record);
+  const priority = priorityFor({ kind: oneLine(record.kind, 40) || 'chat', source: 'auto' });
   return {
     schema: AUTO_CARD_SCHEMA,
     cardId: cardIdOf(eventId),
@@ -123,8 +175,8 @@ export function makeAutoCard(record, { now = () => new Date(), auditKey = null }
     anchor,
     // Event cards decay fast but are never physically deleted (append-only,
     // no forget execution); salience is intentionally lower than curated cards.
-    salience: 1,
-    retention: { decay: 'fast', ttlDays: 30 },
+    salience: priority.salience,
+    retention: priority.retention,
     ...(auditKey ? { sig: macHex(auditKey, JSON.stringify(autoCardPayload({
       schema: AUTO_CARD_SCHEMA,
       cardId: cardIdOf(eventId),
@@ -137,8 +189,8 @@ export function makeAutoCard(record, { now = () => new Date(), auditKey = null }
       title,
       terms,
       anchor,
-      salience: 1,
-      retention: { decay: 'fast', ttlDays: 30 },
+      salience: priority.salience,
+      retention: priority.retention,
     }))) } : {}),
   };
 }
@@ -204,8 +256,8 @@ export function trustedCardFromEvent(card, event) {
     turn: Number.isInteger(event.turn) ? event.turn : anchor?.turn,
     at: new Date(atMs).toISOString(),
     kind: oneLine(event.kind, 40) || 'chat',
-    title: oneLine(event.summary, CARD_TITLE_MAX),
-    terms: Array.isArray(event.terms) ? event.terms.slice(0, 20) : [],
+    title: cardTitleOf(event),
+    terms: mergedCardTerms(event),
     anchor: anchor ? {
       sessionId: anchor.sessionId,
       turn: anchor.turn,
@@ -213,8 +265,8 @@ export function trustedCardFromEvent(card, event) {
       seqEnd: anchor.seqEnd,
       digest: anchor.digest,
     } : null,
-    salience: 1,
-    retention: { decay: 'fast', ttlDays: 30 },
+    salience: priorityFor({ kind: oneLine(event.kind, 40) || 'chat', source: 'auto' }).salience,
+    retention: priorityFor({ kind: oneLine(event.kind, 40) || 'chat', source: 'auto' }).retention,
     sig: card?.sig ?? null,
   };
 }
@@ -387,15 +439,3 @@ function cardScore(card, query) {
   return score;
 }
 
-/** Deterministic keyword/term search over trusted AutoCards. */
-export function searchAutoCards({ memoryRoot, query, limit = 5, verified = true } = {}) {
-  const q = String(query ?? '').trim();
-  const max = Math.max(1, Math.min(20, Number(limit) || 5));
-  if (q === '') return [];
-  return (verified ? readVerifiedAutoCards({ memoryRoot }) : readAutoCards(memoryRoot))
-    .map((card) => ({ card, score: cardScore(card, q) }))
-    .filter((row) => row.score > 0)
-    .sort((a, b) => b.score - a.score || a.card.cardId.localeCompare(b.card.cardId))
-    .slice(0, max)
-    .map((row) => row.card);
-}

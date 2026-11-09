@@ -12,12 +12,12 @@
  *
  *   开机卡插在**第一条真实 user 消息之后**，不再 unshift 到最前：宿主 TurnNavigator
  *   取该轮第一个可见 `kind:'user'` 节点做 tooltip 的 prompt（client.js:8373-8384），
- *   boot 在最前会让第 1 轮显示【开机卡】而不是用户提问（评审第三轮 mustFix #2）。
+ *   boot 在最前会让第 1 轮显示【开机卡】而不是用户提问（复核第三轮 mustFix #2）。
  *
  *   auto 只负责把自己 append 到最后；不再把消息插到 boot 后面（那会得到
- *   `[boot, auto, user, runtime]`，评审 S2 的顺序问题）。
+ *   `[boot, auto, user, runtime]`，复核 S2 的顺序问题）。
  *
- * v4 / 评审第四轮 M1（2026-11-04）：注入消息的 source.kind 从 'user' 改为
+ * v4 / 复核第四轮 M1（2026-11-04）：注入消息的 source.kind 从 'user' 改为
  * 'session-reference'，形状固定为
  *
  *     { kind:'session-reference', form:'recall', version:1, references:[] }
@@ -37,7 +37,7 @@
  *   - 本插件 / identity-router 的注入靠 kind 直接识别（不再依赖正文标记）；
  *   - 正文标记（【自动想起】/【开机卡】）继续保留，用于识别历史消息与外部记忆注入
  *     风格的注入，also keeps firstUserText from eating a legacy card；
- *   - **外部插件**仍可能用 kind:'user' 把文本插到真实提问前（评审 ADV1）。识别不了
+ *   - **外部插件**仍可能用 kind:'user' 把文本插到真实提问前（复核 ADV1）。识别不了
  *     任意纯文本，所以 firstUserText 的取值在 index.js 里按「第 1 轮最后一条真人
  *     消息」锁定，isRealUserMessage 只负责排掉已知注入形态。
  */
@@ -155,7 +155,7 @@ export function isAutoMessage(message) {
  * 且不是本插件 / identity-router / 已知外部注入形态。
  *
  * v4 起注入用 kind:'session-reference'，kind 本身就能挡掉；这里再按正文特征
- * 排一层（评审 ADV1）：带 `source.form` / `source.sections` 的、首行是已知标记的，
+ * 排一层（复核 ADV1）：带 `source.form` / `source.sections` 的、首行是已知标记的，
  * 都不算真人消息。无法凭正文区分「任意外部插件写的纯文本 kind:user」——那类消息
  * 由 firstUserText 的「第 1 轮最后一条」规则处理（见 index.js）。
  * @param {object} message

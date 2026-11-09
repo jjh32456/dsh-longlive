@@ -1,7 +1,7 @@
 /**
  * dsh-auto-recall — 插件骨架（**未安装**，见 ../README.md 与 WIRING.md §9）。
  *
- * 与 WIRING.md §3 的差异（评审第三轮 mustFix 已修）：
+ * 与 WIRING.md §3 的差异（复核第三轮 mustFix 已修）：
  *   - 注册用显式 `{ prepend: false }`，不跟 identity-router 抢外层；
  *     identity-router 在 `next()` 之前把开机卡插到第一条真实 user 之后，auto 作为内层
  *     一定看得到它，最终顺序固定为 `[user, boot, runtime, auto]`（真实 Cordis
@@ -10,7 +10,7 @@
  *   - firstUserText 只认真正的用户消息：`session/event` 里跳过 `【开机卡】`/`【自动想起】`
  *     注入（它们不再是 kind:'user'，但历史消息仍可能带标记），否则开机卡会污染之后
  *     每一轮的查询词；第 1 轮内后来到达的真人消息覆盖先前候选，防外部插件用
- *     kind:'user' 把文本插到真实提问之前（评审 ADV1）；
+ *     kind:'user' 把文本插到真实提问之前（复核 ADV1）；
  *   - 注入前过 privacyScan（privacy-gate 的 scanPrivacy）；标题、摘要、路径都扫，
  *     路径命中整卡丢弃；
  *   - identity-router 已注入的卡路径进 seenPaths（路径级排除），不再无条件排除
@@ -31,6 +31,7 @@ import { appendAuditRecord } from '../memory/audit-records.js';
 import { buildEvidencePackage, writeEvidencePackage } from '../memory/evidence.js';
 import { fastAnswerFromRecallItems } from '../memory/recall-v2.js';
 import { buildQueryText, chooseRecall, decideTrigger, renderInjection } from './recall-core.mjs';
+import { buildRecallLogRecord } from './explain.mjs';
 import { createEmbeddingRuntime } from './embedding.mjs';
 import { privacyScan } from './privacy.mjs';
 import {
@@ -46,7 +47,6 @@ import { dirname, join } from 'node:path';
 import { dshHome } from '../home.js';
 import { DEFAULT_MEMORY_DIRNAME } from '../memory/paths.js';
 import { startPrestepPhase, notePrestepDegrade, setPrestepMeta } from '../metrics/prestep-latency.mjs';
-import { readVerifiedAutoCards } from '../memory/auto-cards.js';
 import { sampleContentHash } from '../memory/auto-cards.js';
 
 export const name = 'dsh-auto-recall';
@@ -88,7 +88,7 @@ const DEFAULTS = Object.freeze({
 
 function normalize(config = {}) {
   const cfg = { ...DEFAULTS, ...config };
-  // 评审 M1：空 / 未配置时走可移植默认链，绝不落到构建机的绝对路径。
+  // 复核 M1：空 / 未配置时走可移植默认链，绝不落到构建机的绝对路径。
   const root = typeof cfg.memoryRoot === 'string' ? cfg.memoryRoot.trim() : '';
   cfg.memoryRoot = root === '' ? defaultMemoryRoot() : root;
   // 注入硬上限 2K token/轮（A4）；下限保留 200，避免误配把注入挤成一条。
@@ -149,30 +149,28 @@ export function apply(ctx, config = {}) {
   // A3：懒加载的本地 embedding；enabled=false 时 create 只做归一化，不碰磁盘/模型。
   const embedding = createEmbeddingRuntime(cfg.embedding, { memoryRoot: cfg.memoryRoot, warn });
   let embeddingWarned = false;
+  // S3（审计 P1-7）：embedding 静默回退时把 channel 标成 degraded；只影响日志，不影响检索。
+  let embeddingDegraded = false;
 
   // A4：「本轮想起」日志（面板读这个）。固定落在 memoryRoot/.longlive/recall-log.jsonl，
   // 一行一轮；写失败只警告一次，绝不影响注入。
+  // S3：每行补 why/eligible/dropped/gate/trigger/channel，见 ./explain.mjs。
   const recallLogPath = cfg.memoryRoot ? join(cfg.memoryRoot, '.longlive', 'recall-log.jsonl') : '';
   let recallLogWarned = false;
-  const logRecall = (sessionId, turn, result) => {
+  const logRecall = (sessionId, turn, result, explain = {}) => {
     if (!recallLogPath) return;
     try {
-      const line = {
-        at: new Date().toISOString(),
-        sessionId: String(sessionId ?? 'unknown'),
-        turn: Number.isFinite(Number(turn)) ? Number(turn) : 0,
-        injected: (result.items || []).map((item) => ({
-          id: item.path,
-          title: item.title,
-          score: Number(Number(item.score ?? 0).toFixed(3)),
-          reason: item.reason ?? 'keyword',
-        })),
-        blocked: (result.rejections || []).map((item) => ({
-          id: item.path,
-          title: item.title,
-          reason: item.reason,
-        })),
-      };
+      const line = buildRecallLogRecord({
+        sessionId,
+        turn,
+        result: result ?? null,
+        gate: explain.gate ?? null,
+        everyNTurns: explain.everyNTurns ?? cfg.everyNTurns,
+        error: explain.error === true,
+        factoryUnavailable: explain.factoryUnavailable === true,
+        embeddingDegraded: explain.embeddingDegraded === true,
+        injectedItems: explain.injectedItems,
+      });
       mkdirSync(dirname(recallLogPath), { recursive: true });
       appendFileSync(recallLogPath, JSON.stringify(line) + '\n');
     } catch (error) {
@@ -302,6 +300,7 @@ export function apply(ctx, config = {}) {
     const attachShared = (value) => (sharedMessage === null ? value : { ...value, messages: mergeInjectionOrder(Array.isArray(value?.messages) ? value.messages : messages, sharedMessage) });
 
     // B3: recall phase wraps the whole recall decision/injection (timing only).
+    let gateInfo = null;
     const recallPhase = startPrestepPhase(key, turn, 'recall');
     try {
       if (turn === 1 && st.sharedInjected !== true && cfg.memoryRoot) {
@@ -349,31 +348,17 @@ export function apply(ctx, config = {}) {
         state: { lastQueryText: st.lastQuery, compactedSinceLast: st.compacted },
         options: { everyNTurns: cfg.everyNTurns },
       });
+      gateInfo = gate;
       if (!gate.recall) {
         notePrestepDegrade(key, turn, { kind: 'gate-skip', phase: 'recall', detail: gate.why });
-        logRecall(key, turn, { items: [], rejections: [] });
+        logRecall(key, turn, null, { gate, everyNTurns: cfg.everyNTurns });
         observe({ key, turn, why: gate.why, queryChars: queryText.length, tokens: 0, ms: Date.now() - started });
         return attachShared(decision);
       }
 
       const loaded = getCards();
-      // 1.8.0 AutoCards: JSONL event→index cards are recall candidates too, so a
-      // matched card carries its origin anchor into the injected block.
-      let loadedForRecall = loaded;
-      if (cfg.memoryRoot) {
-        try {
-          const autoCards = readVerifiedAutoCards({ memoryRoot: cfg.memoryRoot }).map((card) => ({
-            path: `auto:${card.cardId}`,
-            title: card.title,
-            body: [card.title, Array.isArray(card.terms) ? card.terms.join(' ') : ''].filter(Boolean).join('\n'),
-            scopeIn: [],
-            aliases: Array.isArray(card.terms) ? card.terms : [],
-            cardId: card.cardId,
-            anchor: card.anchor,
-          }));
-          if (autoCards.length > 0) loadedForRecall = [...loaded, ...autoCards];
-        } catch { /* cards are additive; never block markdown recall */ }
-      }
+      // 1.8.2 D2: auto-cards are no longer read as recall candidates.
+      const loadedForRecall = loaded;
       // 路径级排除：identity-router 本轮已经注入过的卡，不再注入第二遍。
       // 不再无条件排除首轮 handover/：没装 identity-router 时那张卡就是唯一开机卡。
       const seen = [...new Set([
@@ -393,12 +378,14 @@ export function apply(ctx, config = {}) {
             vectors = ready.cardVectors;
           } else if (!embeddingWarned) {
             embeddingWarned = true;
+            embeddingDegraded = true;
             notePrestepDegrade(key, turn, { kind: 'embedding-fallback', phase: 'recall', detail: ready.code ?? 'not-ready' });
             warn('EMBEDDING_FALLBACK', ready.code, ready.message);
           }
         } catch (error) {
           if (!embeddingWarned) {
             embeddingWarned = true;
+            embeddingDegraded = true;
             notePrestepDegrade(key, turn, { kind: 'embedding-fallback', phase: 'recall', detail: String(error?.code ?? error?.message ?? error) });
             warn('EMBEDDING_FALLBACK', error?.code ?? error?.message ?? error);
           }
@@ -524,7 +511,7 @@ export function apply(ctx, config = {}) {
         notePrestepDegrade(key, turn, { kind: 'zero-hit', phase: 'recall', detail: `eligible=${result.hits.eligible}` });
         st.lastQuery = queryText;
         st.compacted = false;
-        logRecall(key, turn, result);
+        logRecall(key, turn, result, { gate, everyNTurns: cfg.everyNTurns, embeddingDegraded });
         observe({
           key, turn, why: gate.why, queryChars: queryText.length,
           eligible: result.hits.eligible, injected: [], tokens: 0, ms: Date.now() - started,
@@ -546,7 +533,7 @@ export function apply(ctx, config = {}) {
       if (!factory) {
         injectPhase.end();
         notePrestepDegrade(key, turn, { kind: 'factory-unavailable', phase: 'inject' });
-        logRecall(key, turn, { items: [], rejections: result.rejections });
+        logRecall(key, turn, result, { gate, everyNTurns: cfg.everyNTurns, embeddingDegraded, factoryUnavailable: true, injectedItems: [] });
         return decision;
       }
 
@@ -562,7 +549,7 @@ export function apply(ctx, config = {}) {
       st.compacted = false;
       injectPhase.end();
 
-      logRecall(key, turn, result);
+      logRecall(key, turn, result, { gate, everyNTurns: cfg.everyNTurns, embeddingDegraded });
       observe({
         key, turn, why: gate.why, queryChars: queryText.length, eligible: result.hits.eligible,
         injected: result.items.map((i) => i.path), tokens: result.tokens, budget: cfg.budget,
@@ -584,7 +571,7 @@ export function apply(ctx, config = {}) {
       }
       notePrestepDegrade(key, turn, { kind: 'error', phase: 'recall', detail: String(error?.code ?? error?.message ?? error) });
       observe({ key, turn, why: 'error', error: String(error?.code ?? error?.message ?? error), tokens: 0 });
-      logRecall(key, turn, { items: [], rejections: [] });
+      logRecall(key, turn, null, { gate: gateInfo, everyNTurns: cfg.everyNTurns, error: true });
       return attachShared(decision); // 插件失败不许拖垮本轮
     } finally {
       try { recallPhase.end(); } catch { /* timing only */ }
@@ -597,7 +584,7 @@ export function apply(ctx, config = {}) {
       const st = stateFor(session?.id ?? 'unknown');
       if (event?.type === 'user/message' && isRealUserMessage(event?.data)) {
         const text = firstTextOf(event?.data);
-        // 评审第三轮 mustFix #1：注入的【开机卡】/【自动想起】也是 user/message，
+        // 复核第三轮 mustFix #1：注入的【开机卡】/【自动想起】也是 user/message，
         // 旧代码只看 type 就把它们当成 firstUserText，导致之后每轮 query 都混进开机卡。
         //
         // v4 / ADV1：外部插件仍可能用 kind:'user' 把一段上下文插到真实提问**之前**。

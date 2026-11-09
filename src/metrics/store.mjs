@@ -12,6 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { appendJsonLine } from '../util/append-store.js';
 import { summarizeRows, clampFactor, DEFAULT_FACTOR, DEFAULT_KEEP_TURNS } from './measure.mjs';
 import { PRESTEP_FILE_NAME, readPrestepRows, summarizePrestepRows } from './prestep-latency.mjs';
 
@@ -59,20 +60,24 @@ export function readPrestepSummary(options = {}) {
   return summarizePrestepRows(rows);
 }
 
-/** Append one row.  Never throws. */
+/** Append one row.  Never throws. S1: 单写锁 + fsync + 坏行隔离（append-store）。 */
 export function appendTurnRow(row, options = {}) {
   const memoryRoot = options.memoryRoot;
   const file = ledgerPath(memoryRoot);
   if (file === '') return { ok: false, code: 'E_MEMORY_ROOT_UNSET', path: '' };
   if (row === null || typeof row !== 'object') return { ok: false, code: 'E_INVALID_ROW', path: file };
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    const line = `${JSON.stringify(row)}\n`;
-    fs.appendFileSync(file, line, 'utf8');
-    return { ok: true, path: file, bytes: Buffer.byteLength(line, 'utf8') };
-  } catch (error) {
-    return { ok: false, code: 'E_LEDGER_WRITE', path: file, message: String(error?.message ?? error) };
+  const written = appendJsonLine({
+    file,
+    row,
+    label: 'metrics.turns',
+    healthRoot: memoryRoot,
+    now: options.now,
+    quarantineDir: path.join(path.resolve(String(memoryRoot)), '.longlive', 'quarantine'),
+  });
+  if (!written.ok) {
+    return { ok: false, code: written.code === 'E_APPEND_LOCKED' ? 'E_LEDGER_LOCKED' : 'E_LEDGER_WRITE', path: file, message: written.error?.message ?? written.code ?? 'append failed' };
   }
+  return { ok: true, path: file, bytes: written.bytes };
 }
 
 function compareAt(a, b) {
