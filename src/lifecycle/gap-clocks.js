@@ -49,6 +49,42 @@ export function floorSec(ms) {
   return Math.floor(Number(ms) / 1000);
 }
 
+/* ------------------------------------------------------------------ *
+ * 04 主动浮现（proactive surface）的空窗原语 —— 只增不改。
+ * 这些常量/函数只被 src/lifecycle/proactive.js 使用；computeGaps 的语义
+ * 与既有 fixture 完全不动（本段不参与任何现有导出）。
+ * ------------------------------------------------------------------ */
+
+/** 默认空窗门槛：3 小时（配置 minSilenceMs 的默认值）。 */
+export const SILENCE_GAP_DEFAULT_MS = 3 * 60 * 60 * 1000;
+/** 空窗门槛下限：30 分钟（配置钳制下界）。 */
+export const SILENCE_GAP_MIN_MS = 30 * 60 * 1000;
+/** 锚点写者节流：同会话最多 60s 写一次（N-3 的保守补偿量）。 */
+export const ANCHOR_THROTTLE_MS = 60 * 1000;
+
+/**
+ * 空窗判定（纯函数）。方向是「宁可晚一点浮现」：
+ * gapMs = max(0, rawGap − throttle)；补偿后仍不到门槛 → 'short'。
+ *
+ * @param {{now?:number, lastHumanAtMs?:number, throttleMs?:number, minSilenceMs?:number}} [input]
+ * @returns {{status:'unknown'|'clock-rollback'|'short'|'ok', gapMs:number, rawGapMs:number}}
+ */
+export function computeSilenceGap(input = {}) {
+  const nowMs = Number(input.now);
+  const lastHumanAtMs = Number(input.lastHumanAtMs);
+  if (!Number.isFinite(nowMs) || !Number.isFinite(lastHumanAtMs)) {
+    return { status: 'unknown', gapMs: 0, rawGapMs: 0 };
+  }
+  if (nowMs < lastHumanAtMs) {
+    return { status: 'clock-rollback', gapMs: 0, rawGapMs: nowMs - lastHumanAtMs };
+  }
+  const throttle = Number.isFinite(input.throttleMs) ? Math.max(0, input.throttleMs) : ANCHOR_THROTTLE_MS;
+  const minSilence = Number.isFinite(input.minSilenceMs) ? Math.max(0, input.minSilenceMs) : SILENCE_GAP_DEFAULT_MS;
+  const rawGapMs = Math.max(0, nowMs - lastHumanAtMs);
+  const gapMs = Math.max(0, rawGapMs - throttle);
+  return { status: gapMs >= minSilence ? 'ok' : 'short', gapMs, rawGapMs };
+}
+
 /** 中文时长文本（验收用固定格式：X 小时 Y 分 Z 秒 / Y 分 Z 秒 / Z 秒）。 */
 export function formatGapText(ms) {
   const total = Math.max(0, Math.round(Number(ms) / 1000));

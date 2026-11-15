@@ -22,6 +22,7 @@ import { readPrestepSummary } from '../metrics/store.mjs';
 import { readRecallLogRows, summarizeRecallRows } from '../recall/explain.mjs';
 import { readChannels } from '../role/channels.js';
 import { readAttentionView, readPersonalityView, readRelationshipsView } from '../role/readers.js';
+import { readHandoffBoard } from '../handoff/store.js';
 
 import { REVIEW_SCHEMA, normalizeReviewRow } from './actions.js';
 
@@ -188,12 +189,22 @@ function createDefaultReaders(options) {
       : { schema: 'flags/v1', flags: {}, writable: false, note: 'host configEditor 未装配（测试/无宿主形态）' }),
     board: () => {
       const read = boardRows(memoryRoot);
+      // 02-handoff (N3/N8): append one *body-free* segment read from the audit
+      // tail only (never the full board): counts + card summary, no goal text and
+      // no plaintext cwd. A missing/broken handoff board is an empty state.
+      let handoff = { present: false, rows: [], counts: {}, cards: [] };
+      try {
+        handoff = readHandoffBoard(memoryRoot, { now: now().getTime(), limit: 50 });
+      } catch {
+        handoff = { present: false, rows: [], counts: {}, cards: [] };
+      }
       return {
         schema: 'board/v1',
         present: read.present,
         rows: read.rows,
         badLines: read.bad,
         maxSeq: read.rows.reduce((max, row) => (row.seq > max ? row.seq : max), 0),
+        handoff,
       };
     },
     status: () => {

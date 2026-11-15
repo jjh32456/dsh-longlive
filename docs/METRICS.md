@@ -99,7 +99,7 @@ metrics:
 {
   "v": 1,
   "at": "2026-11-05T13:16:33.716Z",
-  "sessionId": "session-e219dedf-...",
+  "sessionId": "session-<id>",
   "turn": 16,
   "layers": { "fixed": 60916, "recent": 33710, "recall": 200, "conclusion": 0 },
   "total": 99899,

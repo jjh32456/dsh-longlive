@@ -53,6 +53,11 @@ import { registerRetention, retentionHealth } from './retention/index.js';
 import { normalizeActivityConfig, registerActivityStream } from './activity/index.js';
 import { registerRole } from './role/index.js';
 import {
+  normalizeProactiveConfig,
+  registerProactive,
+} from './lifecycle/proactive.js';
+import { normalizeHandoffConfig, registerHandoffCard } from './handoff/index.js';
+import {
   claimFallbackInjection,
   markReceiptFallbackInjected,
   readSurgeryState,
@@ -75,6 +80,9 @@ export const FEATURE_DEFAULTS = Object.freeze({
     runOnStart: true,
     startDelayMs: 500,
   }),
+  // 02-handoff: default OFF (hard constraint ① — 1.8.3 behaviour is unchanged
+  // unless the profile config row opts in with `handoff.enabled: true`).
+  handoff: Object.freeze({ enabled: false, dryRun: false }),
 });
 
 function clampInt(value, fallback, min, max) {
@@ -102,6 +110,7 @@ export function normalizeFeatureConfig(config = {}) {
   const maintenance = value.autoMaintenance && typeof value.autoMaintenance === 'object'
     ? value.autoMaintenance
     : {};
+  const handoff = value.handoff && typeof value.handoff === 'object' ? value.handoff : {};
 
   return {
     autoRecall: {
@@ -139,6 +148,8 @@ export function normalizeFeatureConfig(config = {}) {
         300000,
       ),
     },
+    // Optional block, additive only: absent → default OFF (zero hooks, zero IO).
+    handoff: normalizeHandoffConfig(handoff),
   };
 }
 
@@ -665,6 +676,63 @@ export function registerFeatures(ctx, config = {}, options = {}) {
   if (cfg.identityCard.enabled) {
     registerIdentityCard(ctx, cfg.identityCard, memoryRoot, warn);
     enabled.push('identityCard');
+  }
+
+  // 04 主动浮现（proactive surface）：默认关闭（字面 enabled:true 才注册）。
+  // 独立 kill switch：DSH_LONGLIVE_DISABLE_PROACTIVE=1 → normalize 里置 enabled:false。
+  // 注册在 identityCard 之后 → 更外层 → 能看到 boot 卡并让位（设计 §9.1 / M-7）。
+  if (config?.proactive && typeof config.proactive === 'object') {
+    const proactiveCfg = normalizeProactiveConfig(config.proactive, {
+      env: process.env,
+      warn: (message) => warn(message),
+    });
+    if (proactiveCfg.enabled === true) {
+      try {
+        const proactive = registerProactive(ctx, proactiveCfg, {
+          memoryRoot,
+          warn,
+          // 测试缝（生产不配置）：与 autoRecall/identityCard 的 createUserMessage 同款。
+          createUserMessage: typeof config.proactive.createUserMessage === 'function'
+            ? config.proactive.createUserMessage
+            : undefined,
+        });
+        if (proactive.enabled) enabled.push('proactive');
+        else if (proactive.reason === 'no-memory-root') {
+          warn('[proactive] 已开启但没有可解析的 memoryRoot — 已跳过');
+        }
+      } catch (error) {
+        warn(`[proactive] 注册失败（${error?.code ?? error?.message ?? error}）— 已跳过，插件继续加载。`);
+      }
+    }
+  }
+
+  // 02 跨会话交接卡（handoff）：默认关闭（字面 enabled:true 才注册）；独立 kill
+  // switch DSH_LONGLIVE_DISABLE_HANDOFF=1 → normalizeHandoffConfig 里置 enabled:false。
+  // 注册顺序在 identityCard/proactive 之后、workingFrame 之前：pre-step 里它在
+  // boot/shared 之后 splice，workingFrame 再包一层，于是注入相对序为
+  // [真 user, 开机卡, 共享大脑提示, 交接卡, 工作帧, 自动想起]（V6 只断言相对序）。
+  // 没有 memoryRoot 时 warn-skip（对齐 sharedBrain/autoMaintenance 的写法）。
+  if (cfg.handoff.enabled) {
+    if (!memoryRoot) {
+      warn('[longlive] handoff 已开启但没有可解析的 memoryRoot — 已跳过');
+    } else {
+      try {
+        const stream = registerHandoffCard(ctx, {
+          ...cfg.handoff,
+          createUserMessage: cfg.handoff.createUserMessage,
+        }, {
+          memoryRoot,
+          now: config.now,
+          // Test seams only; the host config never carries these.
+          privacyScan: typeof config.handoffPrivacyScan === 'function' ? config.handoffPrivacyScan : undefined,
+          hooks: config.handoffHooks && typeof config.handoffHooks === 'object' ? config.handoffHooks : undefined,
+          logger: warn,
+        });
+        if (stream.enabled) enabled.push('handoff');
+      } catch (error) {
+        warn(`[handoff] 注册失败（${error?.code ?? error?.message ?? error}）— 已跳过，插件继续加载。`);
+      }
+    }
   }
 
   // v2.6.4 连续性最小集：working-frame 只随 memoryV2 开启（默认 off）；

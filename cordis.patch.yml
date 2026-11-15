@@ -7,6 +7,9 @@
 # Override with a name from src/router/policies/<name>.json:
 #         routerPolicyProfile: owner-rulings-2026-11-03
 #
+# 1.8.4: memory upgrades 2/3/4 (cross-session handoff / hot-warm-cold tiers /
+# proactive surfacing) are opt-in and default OFF; this patch keeps the 1.8.3
+# defaults below byte-identical unless the profile config opts in.
 # 1.8.3: subtraction D1-D5 (D2 default-on lineage) / engram 0.13.9 + A1 migration.
 # 1.8.0 product default: features are all enabled here. Explicit false opts out; enabling one never enables
 # another. When several are on, message order is [user, boot, runtime, auto]:

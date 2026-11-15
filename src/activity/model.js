@@ -252,7 +252,7 @@ export function distillActivityText(key, count, lastText) {
   return neutralizeEnvelope(clip(`阶段：${normalizeKey(key)}（${count} 次，最近 ${detail}）`, ACTIVITY_TEXT_MAX));
 }
 
-/** `session-e219...` → `e219dedf`, the prefix hints and the panel show. */
+/** `session-<id>` → its first 8 chars, which the prefix hints and the panel show. */
 export function shortSessionId(value) {
   const id = oneLine(value).replace(SESSION_PREFIX, '');
   const short = id.slice(0, 8);

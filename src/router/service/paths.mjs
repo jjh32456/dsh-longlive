@@ -14,6 +14,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// Local-day primitives live in src/util/local-day.js so product code outside
+// src/router can use them without breaking the R1-ID4 import seam. Re-exported
+// below because every router service module imports them from this module.
+import { localDayKey, nowDate } from '../../util/local-day.js';
+
+export { localDayKey, nowDate };
+
 export const ROUTER_DIR_NAME = 'router';
 export const BOARD_MAX_BYTES = 8192;
 export const BOARD_VERSION = 1;
@@ -38,29 +45,10 @@ export function ensureDir(dir) {
   }
 }
 
-export function nowDate(value) {
-  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : new Date();
-  if (typeof value === 'number' && Number.isFinite(value)) return new Date(value);
-  if (typeof value === 'string') {
-    const ms = Date.parse(value);
-    if (Number.isFinite(ms)) return new Date(ms);
-  }
-  return new Date();
-}
-
 export function isoOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const date = nowDate(value);
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
-}
-
-/** Local-day key (YYYY-MM-DD) — quotas roll over at local midnight. */
-export function localDayKey(value) {
-  const date = nowDate(value);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 export function routerPaths({ memoryRoot, vaultDir } = {}) {

@@ -125,7 +125,9 @@ export function readActivityState(memoryRoot, sessionId) {
   };
 }
 
-function textBlocks(content) {
+// Exported for 02-handoff (v4 §5.3): the handoff producer parses the exact same
+// session events as the activity stream, with the same text/tool extraction.
+export function textBlocks(content) {
   if (!Array.isArray(content)) return '';
   const parts = [];
   for (const block of content) {
@@ -136,7 +138,7 @@ function textBlocks(content) {
   return parts.join('\n');
 }
 
-function messageTextOf(event) {
+export function messageTextOf(event) {
   const data = event?.data ?? {};
   const message = data.message && typeof data.message === 'object' ? data.message : data;
   return textBlocks(message?.content);
@@ -152,7 +154,7 @@ function sessionIdOfMessage(session, event) {
   return ACTIVITY_SESSION_RE.test(id) ? id : '';
 }
 
-function toolSummaryOf(data) {
+export function toolSummaryOf(data) {
   const name = oneLine(data?.name ?? 'tool');
   const args = data?.arguments;
   let snippet = '';

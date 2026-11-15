@@ -1,7 +1,7 @@
 ﻿// src/memory/fts-query.js — M2-A/K2：FTS5 查询构造与文本预分词
 //
 // 依据 `evidence/FTS5-MEMGAP-EVIDENCE.md`（任务 实测）：
-//   * 裸 query 直接进 MATCH 必炸（`1.6.8` → syntax error near "."、`session-c045`
+//   * 裸 query 直接进 MATCH 必炸（`1.6.8` → syntax error near "."、`session-abc`
 //     → no such column、`- " ( ) * OR AND NOT` 各有固定语法错）；
 //   * trigram tokenizer 覆盖中文 ≥3 字子串 / 版本号 / ID / 日期，但 2 字 CJK 与
 //     2 字 ASCII 不命中；

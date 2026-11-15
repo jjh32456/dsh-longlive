@@ -35,7 +35,7 @@
   "outcome": "applied-and-verified",
   "classification": "applied-and-verified",
   "reasonCode": "CUT_APPLIED_AND_VERIFIED",
-  "sessionId": "session-e219dedf-...",
+  "sessionId": "session-<id>",
   "sessionPath": "<sessions-root>/<session>/session.v4.jsonl.zstd",
   "beforeBytes": 4006116,
   "afterBytes": 110329,

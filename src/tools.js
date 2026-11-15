@@ -43,15 +43,18 @@ import { recallV2 } from './memory/recall-v2.js';
 import { memoryProcedure, PROCEDURES_DIR, PROCEDURE_ACTIONS } from './memory/procedure.js';
 import {
   memoryError,
+  memoryRootFromConfig,
   memoryRootSetting,
   defaultMemoryRoot,
   MEMORY_ROOT_ENV,
   LEGACY_MEMORY_ROOT_ENV,
   DEFAULT_MEMORY_DIRNAME,
 } from './memory/paths.js';
+import { normalizeTiering, buildTierHint, DEFAULT_TIERING } from './memory/tiers.js';
 import { liveUpdate, liveList, liveGet, livePrune } from './live.js';
 import { sessionIdOfLogFile } from './live-target.js';
 import { privacyScan } from './recall/privacy.mjs';
+import { searchEventsFts, searchEventsReadOnly } from './memory/event-index.js';
 import {
   buildTurnItems,
   availableTurns,
@@ -2369,6 +2372,195 @@ export function sessionOriginal(args, config) {
   }
 }
 
+// --- 1.8.4-dev: fast keyword search over the FTS5 event index --------------
+//
+// session_search rescans session logs and can run past its 30 s budget on this
+// store (727 sessions / ~9.5k events / 120 MB index). The plugin already keeps
+// a rebuildable SQLite FTS5 index of every turn (.longlive/index/events.db), so
+// grepping costs ~0.2-0.8 s here. This is the fast path; a hit points at
+// session_original(turn=..., sessionId=...) for the actual bytes.
+export function sessionGrep(args, config) {
+  if (!isPlainObject(args)) {
+    throw memoryError('E_BAD_ARGUMENT', 'session_grep 的 args 必须是普通对象');
+  }
+  const query = String(args.query ?? '').trim();
+  if (!query) {
+    return { ok: false, code: 'E_EMPTY_QUERY', message: 'query 不能为空：给一个词或短语（2 个汉字 / 3 个字母以上更容易命中）' };
+  }
+  const requested = Number(args.limit);
+  const limit = Math.max(1, Math.min(30, Number.isFinite(requested) ? Math.trunc(requested) : 8));
+  const sessionFilter = String(args.sessionId ?? '').trim();
+  const kindFilter = String(args.kind ?? '').trim();
+  // MINOR-1：null/undefined = "没传" = auto；其余非白名单 = E_TIER_ARG
+  const TIER_ARG_WHITELIST = ['auto', 'hot', 'warm', 'cold', 'all'];
+  const explicitTierArg = args.tier !== undefined && args.tier !== null;
+  const tierArg = explicitTierArg ? String(args.tier) : 'auto';
+  if (!TIER_ARG_WHITELIST.includes(tierArg)) {
+    return {
+      ok: false,
+      code: 'E_TIER_ARG',
+      message: `tier 必须是 ${TIER_ARG_WHITELIST.join(' / ')} 之一（收到 ${JSON.stringify(args.tier)}）`,
+      hint: "默认 tier=auto；查旧事传 tier:'all'。",
+    };
+  }
+  const tiering = normalizeTiering((config && typeof config === 'object' && config.tiering) ? config.tiering : {});
+  // 1.8.3 默认等价（收尾问题 2）：只有 filter 生效，或调用方显式传 tier:'hot'|'warm'|'cold'|'all'
+  // 时才在响应里回填 03 新增字段；默认 shadow/off 且未传 tier ⇒ 响应与 1.8.3 逐字节一致。
+  const explicitTier = explicitTierArg && ['hot', 'warm', 'cold', 'all'].includes(tierArg);
+  const showTierFields = explicitTier || tiering.mode === 'filter';
+  // MINOR-7（round1）：reader 身份改用 canonical resolver（identity 链：exec.agent →
+  // agents.currentInitiator → ctx.agent → env.DSH_SESSION_ID）；不再手写属性链。
+  // MINOR-8（round1）：同时删除模型可伪造的 currentSessionId 入参 seam——reader
+  // 身份只来自宿主传入的 exec / config，session_grep 的 parameters 里没有这个键。
+  let readerSessionId = '';
+  try { readerSessionId = String(resolveCallerSessionId(config ?? {}).id ?? '').trim(); } catch { readerSessionId = ''; }
+  let memoryRoot;
+  try {
+    memoryRoot = memoryRootFromConfig(config ?? {}, process.env);
+  } catch (error) {
+    return { ok: false, code: error?.code ?? 'E_MEMORY_ROOT', message: error?.message ?? String(error) };
+  }
+  const startedAt = Date.now();
+  const searchArgs = { memoryRoot, query, limit, sessionId: sessionFilter, kind: kindFilter, tier: tierArg, currentSessionId: readerSessionId, tiering };
+  let result;
+  try {
+    result = searchEventsFts(searchArgs);
+  } catch (error) {
+    return {
+      ok: false,
+      code: 'E_INDEX_UNAVAILABLE',
+      message: `FTS 索引不可用：${error?.message ?? error}`,
+      hint: '先跑 scripts/recall-index-build.mjs（或 scripts/index-maintain.mjs）重建 .longlive/index/events.db',
+    };
+  }
+  if (!result || result.ok === false) {
+    // 默认关等价：未显式传 tier 且 tiering.mode 非 filter ⇒ 与 1.8.3 相同的错误面
+    //（一律 E_INDEX_UNAVAILABLE、同 message/hint；不新增 retryable/detail/tierFilter/queryDegraded）。
+    if (!showTierFields) {
+      return {
+        ok: false,
+        code: 'E_INDEX_UNAVAILABLE',
+        message: `FTS 索引查询失败：${result?.error?.message ?? result?.message ?? 'unknown'}`,
+        hint: '先跑 scripts/recall-index-build.mjs 重建索引',
+      };
+    }
+    const PASS_THROUGH = new Set(['E_TIER_ARG', 'E_TIER_SCHEMA_MISSING', 'E_INDEX_QUERY_BUSY', 'E_INDEX_QUERY_FAILED']);
+    const code = PASS_THROUGH.has(result?.code) ? result.code : 'E_INDEX_UNAVAILABLE';
+    const hint = code === 'E_INDEX_QUERY_BUSY'
+      ? '索引正被写入（E_INDEX_QUERY_BUSY），请重试。'
+      : code === 'E_TIER_SCHEMA_MISSING'
+        ? "这个库还没有 tier 列：显式 tier 不可用；tier:'auto' 仍可按时间回退查询。"
+        : '先跑 scripts/recall-index-build.mjs 重建索引';
+    return {
+      ok: false,
+      code,
+      retryable: Boolean(result?.retryable),
+      message: `FTS 索引查询失败：${result?.message ?? 'unknown'}`,
+      detail: result?.detail,
+      tierFilter: result?.tierFilter ?? null,
+      queryDegraded: result?.queryDegraded ?? false,
+      hint,
+    };
+  }
+  let rows = Array.isArray(result.rows) ? result.rows : [];
+  let strategy = result.strategy;
+  let coldSuppressed = result.coldSuppressed;
+  let coldSuppressedCapped = result.coldSuppressedCapped;
+  let suppressedBasis = result.suppressedBasis;
+  let queryDegraded = result.queryDegraded;
+  let queryDegradedCode = result.queryDegradedCode;
+  let suppressedCountStrategy = result.suppressedCountStrategy ?? null;
+  let fallback = 'none';
+  // ★ B1-②：1–2 字兜底路径——计数与 FTS 合并（max），采用兜底行的条件仍是"可见行 > 0"。
+  if (rows.length === 0 && [...query].length <= 2) {
+    try {
+      const scan = searchEventsReadOnly({ memoryRoot, query, limit: 20, tier: tierArg, currentSessionId: readerSessionId, sessionId: sessionFilter, kind: kindFilter, tiering });
+      if (scan && scan.ok) {
+        const nums = [coldSuppressed, scan.coldSuppressed].filter((v) => typeof v === 'number' && Number.isFinite(v));
+        if (nums.length > 0) {
+          const ftsNum = typeof coldSuppressed === 'number' && Number.isFinite(coldSuppressed) ? coldSuppressed : -1;
+          const scanNum = typeof scan.coldSuppressed === 'number' && Number.isFinite(scan.coldSuppressed) ? scan.coldSuppressed : -1;
+          if (scanNum > ftsNum) {           // 并列取 fts
+            coldSuppressed = scan.coldSuppressed;
+            coldSuppressedCapped = scan.coldSuppressedCapped;
+            suppressedBasis = scan.suppressedBasis;
+            suppressedCountStrategy = scan.suppressedCountStrategy ?? 'scan';
+          }
+        } else {
+          coldSuppressed = null;            // 两条路径都降级
+        }
+        if (Array.isArray(scan.rows) && scan.rows.length > 0) {
+          rows = scan.rows;
+          strategy = 'readonly-scan';
+          fallback = 'scan-used';
+        } else {
+          fallback = 'scan-no-row';
+        }
+      } else {
+        fallback = 'none';
+      }
+    } catch {
+      fallback = 'none';
+    }
+  }
+  const hits = rows.slice(0, limit).map((row) => {
+    const summary = String(row.summary ?? '').replace(/\s+/g, ' ').trim();
+    return {
+      sessionId: row.sessionId,
+      turn: row.turn,
+      kind: row.kind,
+      ...(showTierFields ? { tier: row.tier ?? null } : {}),
+      snippet: summary.length > 240 ? `${summary.slice(0, 240)}…` : summary,
+      next: `session_original({ turn: ${row.turn}, sessionId: ${JSON.stringify(row.sessionId)} })`,
+    };
+  });
+  const baseHint = hits.length
+    ? (query.length === 1
+      ? '单字命中面很宽：换 2 个汉字以上的词会更准。要原文用 hits[].next。'
+      : '要原文用 hits[].next；turn 号直接喂给 session_original。')
+    : '没命中：换更短的词（2 个汉字），或确认索引是最新的（scripts/index-maintain.mjs）。';
+  const hint = showTierFields ? buildTierHint({
+    tierFilter: result.tierFilter,
+    coldSuppressed,
+    coldSuppressedCapped,
+    suppressedBasis,
+    hits: hits.length,
+    warmDays: result.warmDays ?? tiering.warmDays ?? DEFAULT_TIERING.warmDays,
+    queryDegraded,
+    queryDegradedCode,
+    suppressedCap: tiering.suppressedCap,
+    baseHint,
+  }) : baseHint;
+  return {
+    ok: true,
+    query,
+    strategy,
+    elapsedMs: Date.now() - startedAt,
+    matched: rows.length,
+    returned: hits.length,
+    hits,
+    hint,
+    // 收尾问题 2：默认关（shadow/off 且未显式传 tier）不输出 03 新字段，响应=1.8.3。
+    ...(showTierFields ? {
+      tierFilter: result.tierFilter,
+      tierApplied: result.tierApplied,
+      suppressedBasis,
+      coldSuppressed,
+      coldSuppressedCapped,
+      suppressedCountStrategy,
+      fallback,
+      // ★ M-A6：off 模式不读 meta ⇒ 这组键在响应里缺席（JSON 里不出现），不伪造 stale:true。
+      ...(result.tierPassAt === undefined ? {} : {
+        tierPassAt: result.tierPassAt,
+        tierStale: result.tierStale,
+        tierLabelsUsable: result.tierLabelsUsable,
+        tierLabelsSource: result.tierLabelsSource,
+      }),
+      queryDegraded,
+      queryDegradedCode,
+    } : {}),
+  };
+}
 export const TOOLS = [
   {
     name: 'session_health',
@@ -2379,6 +2571,31 @@ export const TOOLS = [
     parameters: { ...SESSION_ARGS },
     output: { schema: { type: 'object', additionalProperties: true }, render: (_a, value) => OUTPUT_TEXT(value) },
     invoke: (args, config) => sessionHealth(args, config),
+  },
+  {
+    name: 'session_grep',
+    description:
+      'Fast keyword search over the rebuildable FTS5 event index of every session turn ' +
+      '(<memoryRoot>/.longlive/index/events.db): typically 0.2-0.8 s on this store, while ' +
+      'session_search can run past its 30 s budget. Read-only, bounded output. Returns ' +
+      'sessionId + turn + kind + snippet and a ready-made session_original call for the ' +
+      'original bytes. Use it to find "that turn where we talked about X", then ' +
+      'session_original(turn=..., sessionId=...) for the text. In tier-filter mode old turns ' +
+      "may be in the cold layer: pass tier:'all' when searching for older work. In shadow mode " +
+      '(default) nothing is filtered.',
+    parameters: {
+      query: { type: 'string', description: 'Required. Keywords or a phrase; 2+ CJK chars or 3+ letters hit best.' },
+      limit: { type: 'integer', description: 'Max hits (default 8, clamped 1..30).' },
+      sessionId: { type: 'string', description: 'Optional: keep only events whose session id contains this substring.' },
+      kind: { type: 'string', description: 'Optional: keep only one event kind (chat / conclusion / incident / ...).' },
+      tier: {
+        type: 'string',
+        enum: ['auto', 'hot', 'warm', 'cold', 'all'],
+        description: "Recall layer filter: auto (default; cold hidden only in tier-filter mode), hot/warm/cold (explicit layer), all (never filtered). Old turns may be in the cold layer.",
+      },
+    },
+    output: { schema: { type: 'object', additionalProperties: true }, render: (_a, value) => OUTPUT_TEXT(value) },
+    invoke: (args, config) => sessionGrep(args, config),
   },
   {
     name: 'session_original',

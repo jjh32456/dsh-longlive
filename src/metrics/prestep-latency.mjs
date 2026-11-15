@@ -18,9 +18,10 @@ import { appendJsonLine } from '../util/append-store.js';
 export const PRESTEP_LATENCY_SCHEMA = 'prestep-latency/v1';
 export const PRESTEP_SUMMARY_SCHEMA = 'prestep-summary/v1';
 export const PRESTEP_FILE_NAME = 'prestep.jsonl';
-export const PRESTEP_PHASES = Object.freeze(['boot', 'shared', 'working', 'recall', 'inject', 'budget', 'guard']);
+export const PRESTEP_PHASES = Object.freeze(['boot', 'shared', 'working', 'recall', 'inject', 'budget', 'guard', 'proactive', 'handoff']);
 export const PRESTEP_DEGRADES = Object.freeze([
   'gate-skip', 'embedding-fallback', 'zero-hit', 'budget-trim', 'error', 'factory-unavailable', 'frame-skip',
+  'handoff-skip',
 ]);
 
 const state = {

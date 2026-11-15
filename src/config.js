@@ -241,6 +241,15 @@ const ZH = {
     retainTokens: '保留窗口的估算 token 下限（默认 8000）。',
     autoMinTokens: '自动切达到该估算 token 数才剪（1.8.3 策略线默认 350000；手动 /compact 与溢出恢复不受此限）；每次切刀都会让前缀缓存失效，下一轮全价重算。',
   },
+  // 04 主动浮现 / 02 跨会话交接卡 / 03 热温冷分层：配置键全部走 passthrough（不声明
+  // schemastery 叶子，settings schema 节点数与 1.8.3 锁死一致 153——同 :234-235 的
+  // logMaxBytes"故意不做 leaf"先例）。schemastery 非严格解析会把未声明键合并回解析结果，
+  // 因此 normalize* 仍能从 raw config 读到整块；默认值/钳制/字面布尔语义分别由
+  // src/lifecycle/proactive.js#normalizeProactiveConfig / src/handoff/index.js#normalizeHandoffConfig
+  // / src/memory/tiers.js#normalizeTiering 负责。
+  tiering: '热温冷分层（03）：mode = off / shadow / filter（默认 shadow，读取面与 1.8.3 一致）；filter 时默认只放行 hot+warm，cold 需显式 tier:\'cold\' 或 tier:\'all\'。子键：mode / hotSessions / hotTurns / hotCardDays / hotCardMax / warmDays / hotDays / maxStaleHours / suppressedCap；归一化在 src/memory/tiers.js#normalizeTiering。',
+  proactive: '主动浮现（04）：隔 ≥3 小时回来时注入 1 条 ≤300 字的记忆卡线索（默认关闭；开启后默认先 dry-run，只审计不注入）。子键：enabled / dryRun / minSilenceMs / topicMinScore / topicMinHits / topicMinPhraseChars / topicBudgetTokens（渲染预算，按代码点保守上界收紧 maxChars）/ maxItems（硬钳 0..1；0 = 显式关闭，零注入零额度）/ maxChars / dirs / allowFirstTurn / skipSubagents / logMaxLines。',
+  handoff: '跨会话交接卡（02）：每轮 completed 结束把 目标/已结论/未决/下一步/最近动作 upsert 进源会话的 per-session 卡；新会话首轮按「cwd 门 + 存活门 + 相关性/实质门 + 续接意图（实质 + ≤60min 新鲜 + 唯一近期实质卡）+ 预算 + 认领」选 1 张，注入 ≤281 码点的隐藏消息。默认关闭（字面 enabled:true 才开启）；开启后建议先 dryRun:true 只审计不注入。kill switch：DSH_LONGLIVE_DISABLE_HANDOFF=1。子键：enabled / dryRun / maxChars(128..300) / maxAgeHours(1..168) / firstTurnOnly / inject / write / decidedMax(1..3) / relevanceContainShort(0.2..0.8) / relevanceDiceLong(0.1..0.6) / intentBypass / intentFreshMinutes(10..180) / intentSemantics(unique-recent|latest；latest 需产品拍板) / maxIndexFiles(8..256) / auditWindowRows(100..2000) / privacyScan；归一化在 src/handoff/index.js#normalizeHandoffConfig。',
 };
 
 /** English copy: `en` is the locale fallback chain's base. */
@@ -439,6 +448,9 @@ const EN = {
     retainTokens: 'Minimum estimated tokens kept in the retention window (default 8000).',
     autoMinTokens: 'Automatic cuts happen only once the estimated token count reaches this value (1.8.3 policy default 350000; manual /compact and overflow recovery ignore it); every cut invalidates the prefix cache, so the next turn re-bills at full price.',
   },
+  tiering: 'Recall tiers (03): mode = off / shadow / filter (default shadow; reads match 1.8.3). In filter mode only hot+warm are visible by default; pass tier:\'cold\' or tier:\'all\' to search cold turns. Keys: mode / hotSessions / hotTurns / hotCardDays / hotCardMax / warmDays / hotDays / maxStaleHours / suppressedCap; normalised in src/memory/tiers.js#normalizeTiering.',
+  proactive: 'Proactive surface (04): after a >=3h silence, inject one <=300-char memory-card clue (off by default; when enabled it first runs in dry-run and only audits). Keys: enabled / dryRun / minSilenceMs / topicMinScore / topicMinHits / topicMinPhraseChars / topicBudgetTokens (render budget; a conservative code-point ceiling applied to maxChars) / maxItems (clamped 0..1; 0 = explicitly off: no injection, no quota) / maxChars / dirs / allowFirstTurn / skipSubagents / logMaxLines.',
+  handoff: 'Cross-session handoff card (02): after every completed turn, upsert goal/decided/open/next/last-action into the source session latest card; on a new session\'s first step pick one card through cwd gate + liveness gate + relevance/substance gate + continuation intent (substantive + <=60min fresh + unique recent substantive card) + budget + claim, then inject one hidden <=281-code-point message. Off by default (only a literal enabled:true turns it on); enable dryRun:true first to audit without injecting. Kill switch: DSH_LONGLIVE_DISABLE_HANDOFF=1. Keys: enabled / dryRun / maxChars(128..300) / maxAgeHours(1..168) / firstTurnOnly / inject / write / decidedMax(1..3) / relevanceContainShort(0.2..0.8) / relevanceDiceLong(0.1..0.6) / intentBypass / intentFreshMinutes(10..180) / intentSemantics(unique-recent|latest; latest needs sign-off) / maxIndexFiles(8..256) / auditWindowRows(100..2000) / privacyScan; normalised in src/handoff/index.js#normalizeHandoffConfig.',
 };
 
 function schemaOf() {
@@ -666,6 +678,12 @@ function schemaOf() {
 
     metrics: z.any().description(ZH.metrics),
     embedding: z.any().description(ZH.embedding),
+    // 04 主动浮现 / 02 跨会话交接卡 / 03 热温冷分层：整块 passthrough，**不声明 schemastery
+    // 节点**——settings schema 节点数与 1.8.3 锁死一致 153（同 :234-235 的 logMaxBytes 一类
+    // "故意不做 leaf"先例）。schemastery 非严格解析会把未声明键合并回解析结果，因此
+    // config.proactive / config.handoff / config.tiering 仍是原始行配置，归一化分别由
+    // normalizeProactiveConfig / normalizeHandoffConfig / normalizeTiering 从 raw config 读取；
+    // 配置文案见上方 ZH/EN.tiering、ZH/EN.proactive、ZH/EN.handoff。
 
     d2,
     d6,
