@@ -7,6 +7,9 @@
 # Override with a name from src/router/policies/<name>.json:
 #         routerPolicyProfile: owner-rulings-2026-11-03
 #
+# 1.8.5: hotfix — the tool layer never received `config.tiering`, so tiering.mode:'filter'
+# silently behaved as shadow. The wiring now passes tiering through; regression test
+# (test/wiring-tiering-config.test.mjs) pins it.
 # 1.8.4: memory upgrades 2/3/4 (cross-session handoff / hot-warm-cold tiers /
 # proactive surfacing) are opt-in and default OFF; this patch keeps the 1.8.3
 # defaults below byte-identical unless the profile config opts in.

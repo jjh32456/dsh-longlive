@@ -393,6 +393,10 @@ export function apply(ctx, config = {}) {
     // 1.6.0 safety default: worker_spawn/worker_status/worker_kill are visible
     // in the baseline tool table but return "unavailable" until this is true.
     workers: config.workers,
+    // 2026-11-15 fix: session_grep 的 filter 模式读 config.tiering；这里不把手
+    // 工对象补上 raw row 的 tiering，normalizeTiering 就永远拿默认 shadow，
+    // tiering.mode:'filter' 静默失效。1.8.5 修。
+    tiering: config.tiering,
   });
 
   heartbeat.start();

@@ -2,6 +2,15 @@
 
 > 本文件只保留用户可读的功能与修复摘要；内部开发日志单独保存，不随发布包分发。
 
+## 1.8.5 — 2026-11-15
+
+**热修：③ 分层的 `filter` 模式在 1.8.4 会静默退化成 shadow（配置接线漏传 `tiering`）。**
+
+- 根因：`src/index.js` 注册工具时手工拼装的 bound config 漏了 `tiering` 键，`session_grep` 侧读到的 `config.tiering` 永远是 `undefined`，`normalizeTiering` 于是取默认 `mode:'shadow'`。profile 里写 `tiering.mode:'filter'` 不报错、也不过滤，`session_grep` 响应里连 `tierFilter` 字段都不出现。
+- 修复：把 `config.tiering` 传进 `registerTools`；新增回归测试 `test/wiring-tiering-config.test.mjs`（断言接线存在、工具层确实读该键、`normalizeTiering` 保留 `filter` 字面值）。
+- 行为影响：只影响显式开 `filter` 的 profile；默认 `shadow` 行为与 1.8.4 完全一致——不改默认值、不改设置面板 schemastery 节点数、不迁移数据。
+- 已知限制不变：回填（backfill）来的 tier 标签不被 filter 信任，filter 会退回时间窗口过滤（`warmDays` 默认 30），这是设计内兜底。
+
 ## 1.8.4 — 2026-11-15
 
 **记忆升级 ②③④：跨会话交接卡 / 热温冷分层 / 主动浮现；全部默认关闭，兼容 1.8.3 行为与设置面板节点数不变；隐私与普适性修正。**
