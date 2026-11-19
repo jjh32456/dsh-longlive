@@ -2,6 +2,19 @@
 
 > 本文件只保留用户可读的功能与修复摘要；内部开发日志单独保存，不随发布包分发。
 
+## 1.8.6 — 2026-11-18
+
+**新增 `autoProcedure`：本地规则蒸馏的 procedure 候选（默认关闭；设计经独立红队两轮复审 PASS）。**
+
+- 任务结束后（`turn/end` 且 `reason.kind === 'completed'`，排除 router/注入 turn）**异步**用纯本地规则把可复用工具步骤整理成 procedure 卡四段式**候选**；只写 `<memoryRoot>/.longlive/staging/auto-cards/procedures/`，系统永不自动转正，转正唯一入口仍是 lead 的 `memory_procedure save`（工具签名不变）。
+- 默认 `enabled: false`：关闭时零注册、零读盘、零定时器；解析/写盘全在 `setTimeout` 异步段，turn 尾路径只做字段过滤 + `schedule()`；采样上限 `maxDecompressBytes`（默认 8 MiB，硬上限 64 MiB）：解压后文本超限时改用**尾段窗口**解析（只解压覆盖刚结束 turn 的最后若干帧），只有单帧超限或尾段覆盖不到目标 turn 才记 `reject reason=too_big`；解析失败重试 ≤1。空闲门（`idleMs`）按最后一次真实 `turn/end` 时刻计算，调度本身不推进空闲时钟（`delayMs < idleMs` 也不会无限顺延）。
+- 候选配 sidecar（schema `autoprocedure-candidate/v1`）：来源、digest 锚点证据（`sessionId + turn + seqStart/seqEnd + turnDigest`）、lint 结果、保留期；证据偏移分两种坐标空间（会话解压后 UTF-8 字节 / D2 redact 后落盘文本），D2 证据强制 `callId` 与双 hash，校验时重读 D2 meta 并核对 `turn` / `callId` / `originalSha256`；空证据集或缺少 session 锚点整条拒绝。落盘前一次性校验，失败整条丢弃并计数。
+- 本地确定性 lint 5 类（危险动作 / 证据可验 / 与既有卡冲突 / 触发词 / 路径归一化）写进 `lint.issues[]`，无放行权；周期抽查失败只写 `stale` 报告，不改卡、不删文件、不移目录。
+- 记账 `.longlive/logs/auto-procedure.jsonl`（append-store，固定字段 + `attemptId`，每次尝试恰好一行终态），**不写** `turns.jsonl`；`memory-state.json` 的 `autoProcedure` 在「已运行 ≥7 天且近 7 天零产出」时置 `stalled`，同因拒绝 ≥3 天体现在 `rejectTop.days`（`quota` / `ineligible` 是预期内拒绝，仍计入 `count`，不计入该告警天数）；候选保留期 30 天，过期只在 staging 内移动。
+- B 模式（LLM 润色）默认关：必须显式 `llm.enabled: true`，写 `kind:"llm_enable_ack"` 账本行，经宿主 `ctx.get('llm').stream()` 流式契约调用（promise 式 `complete()` 不是宿主契约），prompt 只含已脱敏片段并再过隐私门，输出仍只进候选；provider 超时/不可用、输出不可解析或**预算耗尽**时都**回落本地 rules 草稿**并如实记 `llm_timeout` / `llm_unavailable` / `llm` 行（预算拒绝记 `llm` 行 `reason=budget`）——开启 B 只多不少。预算 30000/日、15000/次、2 次/日（`dailyLlmCalls` 统计真实调用尝试，成功/超时/不可用都算、预算拒绝不计，并与候选产出解耦）；无 usage 时按估算记账。默认 A 模式零 LLM、零 provider 探测。
+- 配置：同一 `session-longlive` 树新增 `autoProcedure` 块（键与默认值见 [docs/CONFIG.md](docs/CONFIG.md) §1.4d）；设置面板 schemastery 节点 162→163（host peer 3.18.5 实测；1.8.5 基线 149 + autoProcedure 14），工具面（24 个）不变。
+- 验证：新增 `test/autoprocedure/` 8 套件（开关冻结快照、A 模式零 LLM、证据 / 截断重排 / 多字节偏移 / 空证据拒绝 / D2 meta 核对、锁并发（2 进程 + 2 会话）、预算边界、idle 回归、≥40 MiB 大会话尾段采样、stalled、lint 5 类 + 注入 5 例、N3 账本对账、`turns.jsonl` 字节不变、周期抽查不改候选、MAJ-5 B 模式失败/预算后不减少候选；70 用例 69 pass / 1 skip）；全量套件 1585 passed / 0 failed；`scripts/check-no-personal-strings.mjs` 0 命中。
+
 ## 1.8.5 — 2026-11-15
 
 **热修：③ 分层的 `filter` 模式在 1.8.4 会静默退化成 shadow（配置接线漏传 `tiering`）。**

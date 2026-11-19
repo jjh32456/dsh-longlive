@@ -14,7 +14,7 @@ A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back 
 ```powershell
 $DSH  = '<DSH install>\resources\runtime\cli\bin\dsh.cmd'
 $NODE = '<DSH install>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
-& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.5.tgz"
+& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.6.tgz"
 & $DSH plugin --profile desktop list --depth 0
 & $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
@@ -47,6 +47,7 @@ Fully quit and restart the host afterwards. Install from the local tgz with `plu
 
 ## Boundaries
 
+- **Procedure candidates (1.8.6, off by default)**: with `autoProcedure.enabled: true`, a completed turn is distilled by local rules into a four-section **candidate** under `.longlive/staging/auto-cards/procedures/` only. Candidates are never memory cards and are never recalled; promotion stays a manual `memory_procedure save` by the operator. Zero LLM and zero network by default; disabled means zero hooks, zero reads, zero timers. See the `autoProcedure` section of [docs/FEATURES.md](docs/FEATURES.md).
 - It never rewrites memory prose or deletes sessions/cards. `memory_reinforce` updates frontmatter counters and appends a use note; prose is byte-verified unchanged. `memory_forget` archives by default.
 - Backup, both truncations, and forget default to `dryRun` and need their confirm word; `session_compact` is controlled by `dryRun` only. Auto-truncation, router features and other plugin features default to on in 1.8.0 (explicit `false` disables); the confidence gate (`answerGuard.gate`) and a few safety/gray switches default to off.
 - `request` mode (close/cut/verify/restart) is Windows-only; on Linux/macOS use `log` or `dryrun`.

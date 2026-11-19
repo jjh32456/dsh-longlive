@@ -1,6 +1,6 @@
 # CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
-适用版本：**1.8.5**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.8.6**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---
@@ -276,6 +276,48 @@ d6:
   `keepTools` 只能额外按工具名保留，不能自定义任务模板。
 - **回退**：`d6.enabled: false`（或删除整个 `d6` 块）后重启；没有数据迁移。运行中选择、
   `restrict()` 或组装任一步抛错、或裁剪后工具集为空，也一律回到全量工具面，不阻断会话。
+
+### 1.4d 本地规则 procedure 候选 `autoProcedure`（1.8.6 新增，默认关闭）
+
+默认关闭；关闭时模块不注册 hook、不建目录、不读盘、不建定时器。开启后只在 `turn/end`
+（`reason.kind === 'completed'`，排除 router/注入 turn）之后异步采样，候选只写
+`<memoryRoot>/.longlive/staging/auto-cards/procedures/`，系统永不自动转正。
+
+```yaml
+autoProcedure:
+  enabled: false
+  delayMs: 600000
+  idleMs: 60000
+  minToolCalls: 8
+  perSessionCandidates: 1
+  dailyCandidates: 3
+  retentionDays: 30
+  maxDecompressBytes: 8388608   # 1.8.6 复审修复：可配采样上限（硬上限 64 MiB）
+  llm:
+    enabled: false
+    dailyTokenBudget: 30000
+    perCallTokenCap: 15000
+    dailyLlmCalls: 2
+```
+
+| 键 | 类型 | 默认值 | 合法值 / 范围 | 改了要重启？ | 风险与说明 |
+|---|---|---|---|---|---|
+| `autoProcedure.enabled` | boolean | `false` | 仅字面 `true` 开启 | 是 | 关闭时零注册、零读盘、零定时器；未配 `memoryRoot` 时 warn 且不注册 |
+| `autoProcedure.delayMs` | number | `600000` | 0–86400000 | 是 | turn/end 后的异步延迟；解析/写盘只发生在定时器里，不占 turn 尾路径 |
+| `autoProcedure.idleMs` | number | `60000` | 0–86400000 | 是 | 会话空闲门：以最后一次真实 turn/end 时刻计；调度本身不推进空闲时钟，因此 `delayMs < idleMs` 也不会无限顺延 |
+| `autoProcedure.minToolCalls` | number | `8` | 0–1000 | 是 | 一轮至少完成的工具调用数，不足记 `reject reason=ineligible` |
+| `autoProcedure.perSessionCandidates` | number | `1` | 1–100 | 是 | 每会话每个本地日最多候选数，超限记 `reject reason=quota` |
+| `autoProcedure.dailyCandidates` | number | `3` | 1–100 | 是 | 每本地日最多候选数，超限记 `reject reason=quota` |
+| `autoProcedure.retentionDays` | number | `30` | 1–3650 | 是 | 过期候选只在 staging 内移动到 `procedures/archive/`，不删除、不进入正式 `procedures/` |
+| `autoProcedure.maxDecompressBytes` | number | `8388608`（8 MiB） | 65536–67108864（64 MiB 硬上限） | 是 | 解压后文本的采样上限；超过时改用尾段窗口解析（只解压最后若干帧）。单帧超过上限才记 `reject reason=too_big`；调大上限会增加一次性内存占用 |
+| `autoProcedure.llm.enabled` | boolean | `false` | 仅字面 `true` 开启 | 是 | B 模式：显式开启才写 `llm_enable_ack` 账本行并调用宿主 `ctx.get('llm').stream()`（宿主流式契约）；prompt 只含脱敏片段；输出仍只进候选；provider 失败/超时会回落本地 rules 草稿，只多不少 |
+| `autoProcedure.llm.dailyTokenBudget` | number | `30000` | 0–10000000 | 是 | B 模式每日 token 预算；0 = 该维度不设限；超预算记 `reject reason=budget`；provider 不回 usage 时按估算记账 |
+| `autoProcedure.llm.perCallTokenCap` | number | `15000` | 0–10000000 | 是 | B 模式单次调用 token 上限（实际调用还受 2048 output 上限夹取） |
+| `autoProcedure.llm.dailyLlmCalls` | number | `2` | 0–100 | 是 | B 模式每日**真实 provider 调用尝试**次数上限（成功、超时、不可用都计；预算拒绝本身不计）。该计数与候选产出解耦：耗尽后只是不再润色，本地 rules 草稿照常产出候选 |
+
+`autoProcedure` 不注册新工具：转正仍只由 lead 调 `memory_procedure save`。账本在
+`<memoryRoot>/.longlive/logs/auto-procedure.jsonl`；stalled 状态写在
+`<memoryRoot>/.longlive/memory-state.json` 的 `autoProcedure` 字段。
 
 ### 1.5 面板（@jjh32456/dsh-longlive-panel@1.8.0，独立可选插件）
 

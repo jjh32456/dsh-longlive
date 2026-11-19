@@ -62,6 +62,10 @@ longlive 的做法，是把「我」从会话里搬出来，做成一个**共享
 
 它保证的是一双手脚别肿起来；共享大脑在磁盘上，不随某个会话被剪而消失——这正是它和「把整段对话硬塞进上下文」最大的区别。
 
+## 程序性经验候选（1.8.6，默认关闭）
+
+任务结束后，插件可以（`autoProcedure.enabled: true` 时）用纯本地规则把这一轮可复用的工具步骤整理成 procedure 卡的四段式**候选**，只写 `.longlive/staging/auto-cards/procedures/`：它不会自动变成记忆卡，也不会被召回；要不要入库由人判断后手工 `memory_procedure save`。默认零 LLM、零网络，关闭时零副作用；细节与回退见 [docs/FEATURES.md](docs/FEATURES.md) 的 `autoProcedure` 段。
+
 ## 它不做什么
 
 - **不改写记忆正文**。`memory_reinforce` 只改卡片头部的计数、日期，并追加一行使用记录，正文逐字节校验不变；`memory_forget` 只归档，不删文件。
@@ -97,7 +101,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.5.tgz"
+& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.6.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
@@ -152,7 +156,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ## 版本与边界
 
-- 本套文档对应 **1.8.5** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+- 本套文档对应 **1.8.6** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
   1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
   **1.8.0 变更**：有据才答注入修复 + 来源闸（默认关闭的信心闸、证据投递修复，见
   [docs/ANSWER-GUARD.md](docs/ANSWER-GUARD.md)）、共享大脑 thinking（默认开启，仅摘要）、

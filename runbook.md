@@ -97,6 +97,23 @@ $env:DSH_T7_API_KEY = '<你的 key>'
 T7 需要 `DSH_EXE` 与 `DSH_CLI_JS` 指向真实宿主（见 `test/t7_drive.mjs`），且只从环境变量读
 `DSH_T7_API_KEY`，不会去翻凭据文件。
 
+## 1.8 1.8.6 发布安装窗（N4：三项资产检查，缺任一项不许 publish）
+
+这一节是 1.8.6 新增的发布门；它不改变安装步骤，只把「替换宿主目录之前必须做完的三件事」
+写成可检查的清单。执行者：**lead 本人**（或 lead 明确授权的脚本），不是后台代理。
+
+1. **谁在替换前停宿主**：由 lead 本人在场确认，按 runbook 停宿主（先退 DSH，进程不在运行时
+   才允许替换 `node_modules/@jjh32456/dsh-longlive`）；替换前把窗口和停/起责任写进发布记录。
+2. **回滚资产同时存在**：`jjh32456-dsh-longlive-1.8.5.tgz` 与
+   `node_modules/@jjh32456/dsh-longlive.old-<ts>` **同时存在**才允许继续。缺任一项 → 停住，
+   不进入替换。
+3. **回滚演练一次**：在 VM / 测试 profile 用 1.8.5 tgz 换回，验证版本号、工具面、面板完整性、
+   记忆根卡数，演练结果写进发布记录（`_publish-1.8.6/release-assets/PUBLISH-1.8.6.md`）。
+   没做演练或演练失败 → 不许 publish。
+
+三件产物（检查记录、`.old` 目录清单与时间戳、演练结果）都放进发布记录；发布包与 source 树
+另需过 `scripts/check-no-personal-strings.mjs` 0 命中与「真实路径不入包」grep 0 命中。
+
 ## 2. 先备份（可单独执行）
 
 ```

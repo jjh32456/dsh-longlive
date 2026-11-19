@@ -7,6 +7,10 @@
 # Override with a name from src/router/policies/<name>.json:
 #         routerPolicyProfile: owner-rulings-2026-11-03
 #
+# 1.8.6: autoProcedure (local-rule procedure candidates) is OFF by default and
+# adds no hooks, no reads and no timers unless a profile opts in. When enabled it
+# writes candidates under .longlive/staging/auto-cards/procedures/ only; promotion
+# stays a manual memory_procedure save. No tool surface change.
 # 1.8.5: hotfix — the tool layer never received `config.tiering`, so tiering.mode:'filter'
 # silently behaved as shadow. The wiring now passes tiering through; regression test
 # (test/wiring-tiering-config.test.mjs) pins it.
@@ -83,6 +87,14 @@
         identityCard:
           enabled: true
           path: '<memoryRoot>/STATE.md'
+        # 1.8.6: local-rule procedure candidates. Off by default; enabling it adds
+        # one session/event listener + one resettable timer per session, writes only
+        # to <memoryRoot>/.longlive/staging/ and never promotes anything by itself.
+        autoProcedure:
+          enabled: false
+          # 1.8.6 复审修复：解压后采样上限（字节）。超过时降级为尾段窗口解析；
+          # 硬上限 67108864，低于下限 65536 时回落到默认 8388608。
+          maxDecompressBytes: 8388608
         presenceBus:
           enabled: true
           pollMs: 3000

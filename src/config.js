@@ -207,6 +207,25 @@ const ZH = {
     runOnStart: '启动后立即补跑一次（默认开启）。',
     startDelayMs: '启动后延迟毫秒数（默认 500）。',
   },
+  // 1.8.6: 本地规则蒸馏的 procedure 候选（默认关闭；设计见 PLAN-v0.3）。
+  autoProcedure: {
+    $description: '本地规则蒸馏的 procedure 候选（默认关闭）：任务结束后异步从轨迹生成四段式候选，只写 staging，系统永不自动转正；转正唯一入口是 lead 的 memory_procedure save。',
+    enabled: '开启 autoProcedure（默认关闭；关闭时零注册、零读盘、零定时器）。',
+    delayMs: '任务结束后的异步延迟毫秒数（默认 600000；真正的解析/写盘都在定时器里）。',
+    idleMs: '会话空闲判定毫秒数；turn/end 后未满该间隔则顺延（默认 60000）。',
+    minToolCalls: '一轮至少完成的工具调用数，不足不采样（默认 8）。',
+    perSessionCandidates: '每会话每个本地日最多候选数（默认 1）。',
+    dailyCandidates: '每个本地日最多候选数（默认 3）。',
+    retentionDays: '候选保留天数（默认 30；过期只在 staging 内移动或标记，绝不进 procedures/）。',
+    maxDecompressBytes: '采样时允许解压的会话文本上限（字节，默认 8 MiB；超限的会话 reject too_big 不进候选；上限 64 MiB）。',
+    llm: {
+      $description: 'B 模式（LLM 润色）：显式开启才写 llm_enable_ack 账本行并调用宿主 ctx.get(\'llm\')；默认关闭，A 模式零调用零探测。',
+      enabled: '开启 B 模式（默认关闭；必须显式 true）。',
+      dailyTokenBudget: 'B 模式每日 token 预算（默认 30000）。',
+      perCallTokenCap: 'B 模式单次调用 token 上限（默认 15000）。',
+      dailyLlmCalls: 'B 模式每日调用次数上限（默认 2）。',
+    },
+  },
   routerFace: {
     $description: '后台面（routerFace v1）：定时读取共享记忆，写 journal 与建议 outbox（默认开启；显式 false 关闭）。',
     enabled: '开启后台面（默认开启；显式 false 关闭）。',
@@ -416,6 +435,25 @@ const EN = {
     runOnStart: 'Run once shortly after startup (on by default).',
     startDelayMs: 'Startup delay in milliseconds (default 500).',
   },
+  // 1.8.6: local-rule procedure candidates (off by default; see PLAN-v0.3).
+  autoProcedure: {
+    $description: 'Local-rule procedure candidates (OFF by default): after a completed turn, asynchronously distil a four-section candidate from the trace into staging only; the system never promotes a candidate — only the lead\'s memory_procedure save does.',
+    enabled: 'Enable autoProcedure (OFF by default; when off: no hooks, no disk reads, no timers).',
+    delayMs: 'Async delay after a completed turn in ms (default 600000; all parsing/writes happen in the timer).',
+    idleMs: 'Idle gate in ms; a turn/end younger than this postpones the drain (default 60000).',
+    minToolCalls: 'Minimum completed tool calls in one turn (default 8).',
+    perSessionCandidates: 'Maximum candidates per session per local day (default 1).',
+    dailyCandidates: 'Maximum candidates per local day (default 3).',
+    retentionDays: 'Candidate retention in days (default 30; expiry only moves/marks inside staging, never procedures/).',
+    maxDecompressBytes: 'Decompressed session-text cap in bytes for sampling (default 8 MiB; a larger session is rejected with reason too_big and yields no candidate; hard cap 64 MiB).',
+    llm: {
+      $description: 'B mode (LLM polishing): only an explicit enable writes the llm_enable_ack row and calls the host ctx.get(\'llm\'); OFF by default, A mode makes zero calls and zero provider probes.',
+      enabled: 'Enable B mode (OFF by default; must be explicit true).',
+      dailyTokenBudget: 'B-mode daily token budget (default 30000).',
+      perCallTokenCap: 'B-mode per-call token cap (default 15000).',
+      dailyLlmCalls: 'B-mode daily call cap (default 2).',
+    },
+  },
   routerFace: {
     $description: 'Background face (routerFace v1): read shared memory on a timer and write a journal and suggestion outbox (on by default; explicitly false opts out).',
     enabled: 'Enable the background face (on by default; explicitly false opts out).',
@@ -554,6 +592,27 @@ function schemaOf() {
     retainTokens: z.number().default(8000).description(ZH.hotTruncate.retainTokens),
     autoMinTokens: z.number().default(350000).description(ZH.hotTruncate.autoMinTokens),
   }).collapse();
+
+  // 1.8.6 autoProcedure: 默认关闭的独立配置树。所有叶子都带默认值，归一化器
+  // (src/autoprocedure/config.js) 会再校验一次范围；这里只负责宿主可见的 schema。
+  const autoProcedureLlm = z.object({
+    enabled: z.boolean().default(false).description(ZH.autoProcedure.llm.enabled),
+    dailyTokenBudget: z.number().default(30000).description(ZH.autoProcedure.llm.dailyTokenBudget),
+    perCallTokenCap: z.number().default(15000).description(ZH.autoProcedure.llm.perCallTokenCap),
+    dailyLlmCalls: z.number().default(2).description(ZH.autoProcedure.llm.dailyLlmCalls),
+  }).collapse().description(ZH.autoProcedure.llm.$description);
+
+  const autoProcedure = z.object({
+    enabled: z.boolean().default(false).description(ZH.autoProcedure.enabled),
+    delayMs: z.number().default(600000).description(ZH.autoProcedure.delayMs),
+    idleMs: z.number().default(60000).description(ZH.autoProcedure.idleMs),
+    minToolCalls: z.number().default(8).description(ZH.autoProcedure.minToolCalls),
+    perSessionCandidates: z.number().default(1).description(ZH.autoProcedure.perSessionCandidates),
+    dailyCandidates: z.number().default(3).description(ZH.autoProcedure.dailyCandidates),
+    retentionDays: z.number().default(30).description(ZH.autoProcedure.retentionDays),
+    maxDecompressBytes: z.number().default(8388608).description(ZH.autoProcedure.maxDecompressBytes),
+    llm: autoProcedureLlm,
+  }).collapse().description(ZH.autoProcedure.$description);
 
   // 1.8.3 fold/truncate are separate concepts and separate config namespaces.
   const fold = z.object({
@@ -697,6 +756,7 @@ function schemaOf() {
     role,
     answerGuard,
     autoMaintenance,
+    autoProcedure,
     retention,
     routerFace,
     autoTruncate,

@@ -1,4 +1,4 @@
-# 1.8.5 可选能力与开关
+# 1.8.6 可选能力与开关
 
 ## 1.8.3 A1 结论候选池（默认开启）
 
@@ -109,6 +109,7 @@ fail-closed 到「不重复注入」并只 warn 一次；30 天以上的 marker 
 ''unavailable'`；显式 true 才可派子会话 |
 | `d2.enabled` | `true` | `tools/post-execute` | 工具结果超 `maxInlineChars` 时只放头尾，全文写 `.longlive/tool-output/`，可用 `session_original` 读回 |
 | `d6.enabled` | `true` | `agent/inbox/claimed` + `system-prompt/assemble` + `tool_search` 工具 | 首条真实用户消息按任务类型冻结工具 allowlist（重启恢复的 turn>1 会话也冻结一次）；`tool_search` 可追加被裁掉的工具；`dryRun` 只记日志 |
+| `autoProcedure.enabled` | `false` | `session/event`（turn/end）+ 每会话一个可重置定时器 | 任务结束后异步做本地规则蒸馏，四段式 **候选**只写 `.longlive/staging/auto-cards/procedures/`；系统永不自动转正，转正仍只由 lead 的 `memory_procedure save` 完成。关闭时零注册、零读盘、零定时器 |
 
 默认值列按 1.8.0 口径：`true` = 默认开启（未显式给则开，仅字面 `false` 关闭）；`routerRuntime` 等安全/灰度项仍默认关。`routerRuntime`、`keepEvents`、`recentWriteWindowMs`、`routerPolicyProfile` 的语义
 没有变化。注意 `routerRuntime` 是旧的「工具执行前 R1 判定」接缝，`routerEnabled`
@@ -162,6 +163,19 @@ config:
     dryRun: false
     log: true
     keepTools: []
+  autoProcedure:
+    enabled: false
+    delayMs: 600000
+    idleMs: 60000
+    minToolCalls: 8
+    perSessionCandidates: 1
+    dailyCandidates: 3
+    retentionDays: 30
+    llm:
+      enabled: false
+      dailyTokenBudget: 30000
+      perCallTokenCap: 15000
+      dailyLlmCalls: 2
 ```
 
 ### `autoRecall`
@@ -318,6 +332,24 @@ Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/rou
   三类；`keepTools` 只能按工具名额外保留，不能自定义任务模板。
 - **风险**：同一会话内 allowlist 在首条真实用户消息上冻结（宿主重启后恢复的 turn>1 会话同样冻结一次），不随消息变化；`tool_search` 多一次
   工具往返；`dryRun: true` 时 `tool_search` 不会注册。
+
+### `autoProcedure`（本地规则 procedure 候选，1.8.6 新增，默认关闭）
+
+- **默认状态**：`enabled: false`。关闭时本模块不注册 hook、不建目录、不读盘、不建定时器；开启后也只写 staging，绝不写 `procedures/`。
+- **做什么**：在 `turn/end`（`reason.kind === 'completed'`，排除 `data.origin` / `data.task.origin` 为 `router` 的 turn）后，等 `delayMs`（默认 600000 ms）+ 空闲门（`idleMs`，按最后一次真实 `turn/end` 时刻计算，调度本身不推进空闲时钟）之后，异步读取该会话日志，用纯本地规则把已完成的工具调用序列整理成 procedure 卡的四段式**候选**：
+  - 采样上限 `maxDecompressBytes`（默认 8 MiB，硬上限 64 MiB）：解压后文本超过上限时改用**尾段窗口**解析（只解压覆盖刚结束 turn 的最后若干帧，累计仍受该上限约束），不再整包失败；只有单帧本身就超过上限、或尾段覆盖不到目标 turn 时才记 `reject reason=too_big`。`too_big` 计数保留在账本里，不会被静默吞掉。
+  - 只写 `<memoryRoot>/.longlive/staging/auto-cards/procedures/<slug>.md` 与 `<slug>.meta.json`（schema `autoprocedure-candidate/v1`，含来源、证据、lint、保留期）。
+  - 每条候选带 digest 锚点证据（`sessionId + turn + seqStart/seqEnd + turnDigest`）与摘录；落盘前一次性校验，失败整条丢弃并计数。
+  - 偏移空间分两种：`from:"session"` 用「解压后会话文本的 UTF-8 字节」，`from:"d2"` 用「D2 redact 后落盘文本」；两处都定位不到的证据直接丢弃（D2 证据必须带 `callId`，缺则丢弃）。
+  - 本地确定性 lint 5 类（危险动作 / 证据可验 / 与既有卡冲突 / 触发词 / 路径归一化），问题写进 sidecar 的 `lint.issues[]`；lint 只产意见，没有放行权。
+- **A 模式（默认）**：零 LLM、零 provider 探测。四段文本全部来自本地模板 + 事件字段，禁止「先本地再让模型润色」。
+- **B 模式（默认关）**：只有显式 `llm.enabled: true` 才写一条 `kind:"llm_enable_ack"` 账本行，并调用宿主 `ctx.get('llm').stream()`（唯一入口，宿主流式契约；promise 式 `complete()` 不是契约）；prompt 只含已脱敏片段，构造后再过隐私门；模型输出仍只进候选。不可解析、超时、provider 不可用或**预算耗尽**时都**回落本地 rules 草稿**并如实记 `llm_timeout` / `llm_unavailable` / `llm` 行（预算拒绝记 `llm` 行 `reason=budget`，不是 reject）——开启 B 模式只会让候选更完整，不会比 A 模式更少。预算：`dailyTokenBudget:30000`、`perCallTokenCap:15000`、`dailyLlmCalls:2`（`dailyLlmCalls` 统计真实 provider 调用尝试，成功/超时/不可用都算，预算拒绝不计，且与候选产出解耦）；provider 未回 usage 时按 prompt/输出文本估算记账，不记 0。
+- **记账 / 告警**：每次尝试写 `.longlive/logs/auto-procedure.jsonl`（append-store，固定字段 + `attemptId`；每个 attemptId 恰好一行终态 `draft | reject | stale`），不写 `turns.jsonl`。账本已运行 ≥7 天且近 7 天 `drafted=0` 时，`.longlive/memory-state.json` 的 `autoProcedure.state` 变成 `stalled`；同一拒绝原因连续 ≥3 天体现在 `autoProcedure.rejectTop.days`——但 `quota` / `ineligible` 属于预期内的配额与不满足触发条件，仍计入 `rejectTop.count` 与账本，不计入这个「需处理」天数。
+- **保留期**：`retentionDays: 30`；过期候选只在 staging 内移动到 `procedures/archive/`，不删除、任何情况下不进入正式 `procedures/`。
+- **不是卡、不会被召回**：候选不是正式卡，`scanProcedures` 读不到，也不会被自动想起。转正唯一入口是 lead 手工 `memory_procedure save`，正式卡保留 `source_session / source_turn / written_at` 责任戳；工具签名没有变化。
+- **证据口径**：证据校验能说明的只是「未发现伪造 / 回读失败」，不说明内容正确；会话被裁切或重排后偏移可能失效，周期抽查只产 `stale` 报告，不改候选、不删文件、不移目录。
+- **偏移口径（1.8.6 写死）**：真值只有 `turnDigest` 与摘录 `excerptSha256`；`excerptOffset / excerptLen` 仅作定位提示。尾段降级解析时 `excerptOffset` 是尾段窗口内的偏移，不保证是整包绝对偏移，所以校验精确偏移失败后只在**同一 turn 内**按「同长度 + 同 `sha256`」重定位；任何不确定（同 turn 内找不到、digest 不一致、D2 meta 身份不符）一律 fail closed 丢弃该条证据，绝不「大概定位」后放行。1.8.7 计划新增采样标记区分整包/尾段偏移。
+- **回退**：`autoProcedure.enabled: false` 后重启；已生成的候选留在 staging，可人工阅读或丢弃，没有数据迁移。
 
 ### `hotTruncate`（热截断，`compaction-hot-truncate` 行，默认接管压缩）
 

@@ -1,0 +1,64 @@
+{
+  "name": "@jjh32456/dsh-longlive-panel",
+  "version": "1.8.1",
+  "description": "久视（longlive）共享大脑面板 1.8.1：七页签只读 + 记忆/回忆/遗忘三板块只读展示；经长活 M2-G 的受控判定动作（18 动作，能力令牌在宿主内存，不落盘）；summary 新增可选 autoProcedure 只读块（默认关闭、零 staging IO）。",
+  "type": "module",
+  "main": "src/server.js",
+  "files": [
+    "src/",
+    "cordis.patch.yml",
+    "INSTALL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/server.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "memory-palace",
+    "longlive",
+    "readonly"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "longlive contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jjh32456/dsh-longlive.git",
+    "directory": "panel"
+  },
+  "homepage": "https://github.com/jjh32456/dsh-longlive/tree/main/panel#readme",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node self-test.mjs && node --test gap-fixes.test.mjs && node --test auto-procedure.test.mjs && node clean-env-smoke.mjs",
+    "smoke:clean-env": "node clean-env-smoke.mjs"
+  },
+  "peerDependencies": {
+    "@jjh32456/dsh-longlive": "^1.8.0"
+  },
+  "peerDependenciesMeta": {
+    "@jjh32456/dsh-longlive": {
+      "optional": false
+    }
+  }
+}

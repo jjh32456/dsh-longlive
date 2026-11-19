@@ -1,20 +1,20 @@
 {
   "schema": 1,
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.5",
-  "expectedVersion": "1.8.5",
+  "version": "1.8.6",
+  "expectedVersion": "1.8.6",
   "builtBy": "scripts/pack.mjs",
-  "generatedAt": "2026-11-15T00:00:00.000Z",
-  "fileCount": 281,
-  "sourceTreeSha256": "cc189545130ff3cbc7db880133aea7b160c1a73bd5c15a75e784a359a14cae87",
+  "generatedAt": "2026-11-18T15:49:31.452Z",
+  "fileCount": 294,
+  "sourceTreeSha256": "dd8ed6594b80d44c1cb4e7344debe7fc0d558ad2bd50bc5bbea6e56231d7a900",
   "manifestExcludes": [
     "build-info.json"
   ],
   "files": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 5709,
-      "sha256": "3d5e328ed5903a0af585c7dd8f00a47833bb7084034adeb186ce48396370294d"
+      "bytes": 9648,
+      "sha256": "d2f4afec2e612271c538b73957bb63f2c85540d4b8fbfbb29a91498db6e9f8ab"
     },
     {
       "path": "LICENSE",
@@ -24,27 +24,27 @@
     {
       "path": "QUICKSTART.md",
       "bytes": 18012,
-      "sha256": "7f49660ebf1b96d1e7cbe16e12faad84dab8f76895521a8ddfc688e133915d92"
+      "sha256": "577fd4e154d2937c3521552935b397c036f6a269798de4f319f1a8eb48c948d6"
     },
     {
       "path": "README.en.md",
-      "bytes": 5564,
-      "sha256": "f3f4f38dc4ab896c9b698bd645b1509f3ee43873d082dfbb1ea37f338ad4106a"
+      "bytes": 6073,
+      "sha256": "3dafaf44ff8c6b590b5d11fe48b828e56fcc87db7b28e430bb66e6fabf9d89a4"
     },
     {
       "path": "README.md",
-      "bytes": 16668,
-      "sha256": "3a5dd50e8734183adb238bd925e7a64247c0ff0eccff16ed5fc909b4ce3d3b04"
+      "bytes": 17196,
+      "sha256": "b3ffe28ff3397c038dba546b8e3bd5d1ee618f603bd76b4311d0b2f978d1a32c"
     },
     {
       "path": "SPEC.md",
       "bytes": 22890,
-      "sha256": "5f1aecf502c3ee65daa1257b7c28bb0dbb0b5c29c2396b30ff33bbc56a061620"
+      "sha256": "bced5dec69ce167b33805412c572f4ff0f3b61ed2386b5ef69bd2109b1cee0e7"
     },
     {
       "path": "cordis.patch.yml",
-      "bytes": 5185,
-      "sha256": "5b08490b6f4928e8cd7228231fc1646134a47d866ee279fe4e5261982d6c27b2"
+      "bytes": 6022,
+      "sha256": "bd3e3b53d11b4bab93ba1179966cc8c387cca9b1c0c62318a12ab66c1edf7875"
     },
     {
       "path": "docs/A1-MIGRATION.md",
@@ -59,7 +59,7 @@
     {
       "path": "docs/ARCHITECTURE.md",
       "bytes": 10258,
-      "sha256": "f2f644f3c5a7ea0d7371f20b47f7c57a9f19ea4f5ce30a0fab30a79783ef925a"
+      "sha256": "f3c6900ffe82f7d1e13b597624a486975fb0c17ce109b36073448c19840fccce"
     },
     {
       "path": "docs/AUTO-RECALL-WIRING.md",
@@ -78,8 +78,8 @@
     },
     {
       "path": "docs/CONFIG.md",
-      "bytes": 52278,
-      "sha256": "d943d9c1445917ee52da5504a0079c840c9552586f8d077c066cffeb4e9aacfb"
+      "bytes": 55904,
+      "sha256": "cf9812becfd504fb69ffa02320a75c134a36eccf931bf9700ce4f877b3e31d8a"
     },
     {
       "path": "docs/ERRORS.md",
@@ -89,12 +89,12 @@
     {
       "path": "docs/FAQ.md",
       "bytes": 12715,
-      "sha256": "ef9efcbed8919f031992bfda3d934389f4eb418f9aa152956e9addc53cffcee4"
+      "sha256": "2ba237cfdc43650ca1a5c94091b86cd9422866ebf7e6fc49e0e90d507d733604"
     },
     {
       "path": "docs/FEATURES.md",
-      "bytes": 29319,
-      "sha256": "220be250095083a61053e1eed66d4aff5b39008f8ce969a9704cf5ffba1b06ec"
+      "bytes": 34871,
+      "sha256": "9920b798981ddd588de217cc83eb881d97b53412f74bd416b4377da6a09cfa50"
     },
     {
       "path": "docs/INDEX-FRESHNESS.md",
@@ -114,7 +114,7 @@
     {
       "path": "docs/OPERATIONS.md",
       "bytes": 27334,
-      "sha256": "341dff7128f4e31dfcd315b9db65d61cef0894ad96c4414dbed435f0b8e2a361"
+      "sha256": "778ea217141c7333ce29012b4f418674f70a280bbe5f624a48d728cb57b74d5b"
     },
     {
       "path": "docs/PANEL-INTEGRATION.md",
@@ -129,7 +129,7 @@
     {
       "path": "docs/QUICKSTART.md",
       "bytes": 9358,
-      "sha256": "1e90e9e29848b274a72c8c5f70ffeff9d182521262e59f99f23e10266b540e93"
+      "sha256": "b4478178dc50e41385817c6ef757fac93f98a62f00f08d27f8f162061bd008e3"
     },
     {
       "path": "docs/RAW-INDEX-POLICY.md",
@@ -139,7 +139,7 @@
     {
       "path": "docs/README.en.md",
       "bytes": 3978,
-      "sha256": "9d569b921020d7c62464a5136a19a67f25c963e156c9b7caf56e0fcf44aa3b77"
+      "sha256": "891001d41a748192c4b1297aef9e3787ffc6aebdbc0ecc965430c54409f6755e"
     },
     {
       "path": "docs/RESIDENT-WATCHER.md",
@@ -159,7 +159,7 @@
     {
       "path": "docs/TROUBLESHOOTING.md",
       "bytes": 15093,
-      "sha256": "715222291f69b3018aab81cb1b972cab86059bf792dd8ddb0a37bee3aff234df"
+      "sha256": "67bdfc8e3f89386efe7ada20824a8733204b7ce92ecfd10d732bba29d1ee63a7"
     },
     {
       "path": "icon.svg",
@@ -184,12 +184,12 @@
     {
       "path": "package.json",
       "bytes": 4696,
-      "sha256": "b1669bd4a8ef76c8ed406f9976589eca0df140bc659514297dc2e8e859e032fb"
+      "sha256": "89f0418580c87876c8d4510ebfa4abb13fb2cf7df4c742beee2e23e2daa7f81e"
     },
     {
       "path": "runbook.md",
-      "bytes": 17324,
-      "sha256": "6b0add89c5d8ae001534b57421fa5ad7cc3409568c442763028f18fe8a0d7e81"
+      "bytes": 18622,
+      "sha256": "3816b757da65565d2f5b4c4815e2eafd7da7a73c1ac73a32bf2797e6663bc234"
     },
     {
       "path": "scripts/auto-truncate-run.ps1",
@@ -452,6 +452,71 @@
       "sha256": "25975e1f185c1bccc25d3abbe57b9777b2e449de8dd5fa905902d6c5a682c315"
     },
     {
+      "path": "src/autoprocedure/candidate.js",
+      "bytes": 13377,
+      "sha256": "6ffbcfc748620f5e76061ff174d0616f3b1a01c0dafa68a8d96927cee8cf87b7"
+    },
+    {
+      "path": "src/autoprocedure/config.js",
+      "bytes": 5820,
+      "sha256": "468f2ba65c1bb332f3f34412df383a660480e687eb2613b6be4b47436064e242"
+    },
+    {
+      "path": "src/autoprocedure/evidence.js",
+      "bytes": 15783,
+      "sha256": "042124a789c59e90b2c6f07b1cfbd7672fed27b3ef7f3f66ec38f341b3509150"
+    },
+    {
+      "path": "src/autoprocedure/index.js",
+      "bytes": 2082,
+      "sha256": "77dc06f6f970ad985a3cd95daa0a481d839df8f4b37d5bfb397e8142a37d57bf"
+    },
+    {
+      "path": "src/autoprocedure/ledger.js",
+      "bytes": 13211,
+      "sha256": "95b6eab26be927fb62600b430cf5378d4a74484190701b542d1d3eaa81d058b8"
+    },
+    {
+      "path": "src/autoprocedure/lint.js",
+      "bytes": 9772,
+      "sha256": "07eddfd8defd2bb6e8bdd1536a078799a0eaa0f129191766767d9f30ff5bf20c"
+    },
+    {
+      "path": "src/autoprocedure/llm.js",
+      "bytes": 16491,
+      "sha256": "5b618502c15900659581a08346b9c3e0da4c67ed3b6d991d45c199602332c5cb"
+    },
+    {
+      "path": "src/autoprocedure/locks.js",
+      "bytes": 3801,
+      "sha256": "4a09063e2e7ac4d51310820dca1b5150bf6799f1b6472a51796231f23a42022a"
+    },
+    {
+      "path": "src/autoprocedure/paths.js",
+      "bytes": 1997,
+      "sha256": "3488e63d0c81fe809643186424c7a2272a9df949d40c94f43a68ae08b1da3b4c"
+    },
+    {
+      "path": "src/autoprocedure/privacy.js",
+      "bytes": 3597,
+      "sha256": "53b0f2d74d04d119201bb1aaff002d32d6397e744838821f9d188fc17cf57275"
+    },
+    {
+      "path": "src/autoprocedure/rules.js",
+      "bytes": 11401,
+      "sha256": "8c6f6269b58214bbf629bedf121aea91e09651a8248880297cfaefc76529ca8b"
+    },
+    {
+      "path": "src/autoprocedure/runtime.js",
+      "bytes": 29361,
+      "sha256": "3d38639e388ad0268dbf0953332321a5e8b369f0119a04ab398f83cff1b7eb28"
+    },
+    {
+      "path": "src/autoprocedure/session-reader.js",
+      "bytes": 12534,
+      "sha256": "74474e364f94ce30c7eaf804fff6a211a9f7ebe616ba9b7124469335d7118686"
+    },
+    {
       "path": "src/backup.js",
       "bytes": 5688,
       "sha256": "c272d701d988194bdae64bb6cdc75829a91895af0e6320931b51795b704acbf6"
@@ -493,8 +558,8 @@
     },
     {
       "path": "src/config.js",
-      "bytes": 55221,
-      "sha256": "dd876d9e25a91f46184eda6939035b18912d28801ec50f0478d78c81c58bf452"
+      "bytes": 60229,
+      "sha256": "3430381000af0bd6c574e716f012450c4fa7b6150be394f2e7551301848fdf5c"
     },
     {
       "path": "src/d6/runtime.js",
@@ -588,8 +653,8 @@
     },
     {
       "path": "src/index.js",
-      "bytes": 31040,
-      "sha256": "c5c2cb4f333820bf4a01c0533d3127f65b89db697c35f4e9e5d5675b4816d191"
+      "bytes": 32169,
+      "sha256": "277ea86cd47c4170a7a590de4ba4862e98e3ce09c334576b973eda4cb66fb750"
     },
     {
       "path": "src/lifecycle/gap-clocks.js",

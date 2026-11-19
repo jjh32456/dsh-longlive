@@ -72,6 +72,7 @@ import { registerToolOutputTrim } from './tool-output.js';
 import { registerD6 } from './d6/runtime.js';
 import { registerHostLifecycle } from './lifecycle/index.js';
 import { registerTurnCapture } from './memory/capture-host.js';
+import { registerAutoProcedure } from './autoprocedure/index.js';
 import { registerPanelApiRoutes } from './ui/panel-api.js';
 import { registerUiRoutes } from './ui/routes.js';
 
@@ -501,6 +502,28 @@ export function apply(ctx, config = {}) {
     surgeryReceipt,
     sessionsRoot: path.join(home, 'sessions'),
   });
+
+  // 1.8.6 autoProcedure（默认关闭）：任务结束后异步做本地规则蒸馏，候选只写
+  // staging，系统永不自动转正。enabled:false 时这里不注册 hook、不建目录、不
+  // 读盘；开启但 memoryRoot 未配置时 warn + 不注册（F11）。失败只告警，绝不让
+  // 插件加载失败。
+  try {
+    const autoProcedure = registerAutoProcedure(ctx, config, {
+      memoryRoot,
+      home,
+      now: config.now ?? (() => new Date()),
+      logger: { warn: (message) => warnOnce(ctx, message) },
+    });
+    featuresResult.autoProcedure = {
+      enabled: autoProcedure.enabled,
+      registered: autoProcedure.registered,
+      hooks: autoProcedure.hooks ?? [],
+      ...(autoProcedure.reason ? { reason: autoProcedure.reason } : {}),
+    };
+  } catch (error) {
+    warnOnce(ctx, '[autoprocedure] 注册失败（' + (error?.message ?? error) + '）— 已跳过，插件继续加载。');
+    featuresResult.autoProcedure = { enabled: false, registered: false, reason: 'E_AP_REGISTER' };
+  }
 
   // 1.8.0 answer guard (ON by default): registers the outermost pre-step evidence
   // injection, the system-prompt rule section, the session/event audit listener and
