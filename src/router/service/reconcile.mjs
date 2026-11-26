@@ -112,10 +112,30 @@ export function scanDayUsage(options = {}) {
 
 function sumAuditSettled(auditRecords, runId) {
   let total = 0;
+  // 2026-11-26 重新打上 1.8.6 覆盖掉的补丁：service.mjs 的 budget.overshoot 分支
+  // 只写 budget.overshoot 就 halt，不写 budget.settle（账本却有 settle 行）。
+  // 对同一 reservation，若审计已有 settle 则只计 settle；否则计 overshoot 的 applied。
+  const settledReservations = new Set();
+  const overshoots = new Map();
   for (const rec of Array.isArray(auditRecords) ? auditRecords : []) {
-    if (!rec || rec.run_id !== runId || rec.kind !== 'budget.settle') continue;
-    const tokens = Number(rec.tokens);
-    if (Number.isFinite(tokens) && tokens >= 0) total += tokens;
+    if (!rec || rec.run_id !== runId) continue;
+    if (rec.kind === 'budget.settle') {
+      const tokens = Number(rec.tokens ?? rec.actual_tokens);
+      if (Number.isFinite(tokens) && tokens >= 0) {
+        total += tokens;
+        if (typeof rec.reservation_id === 'string') settledReservations.add(rec.reservation_id);
+      }
+    } else if (rec.kind === 'budget.overshoot') {
+      const applied = Number(rec.applied ?? rec.applied_tokens);
+      if (Number.isFinite(applied) && applied >= 0) {
+        const key = typeof rec.reservation_id === 'string' ? rec.reservation_id : '';
+        overshoots.set(key, (overshoots.get(key) ?? 0) + applied);
+      }
+    }
+  }
+  for (const [key, applied] of overshoots) {
+    if (key && settledReservations.has(key)) continue;
+    total += applied;
   }
   return total;
 }
@@ -229,9 +249,7 @@ export function verifyRunAnchors(options = {}) {
         failure: { runId: entry.runId, reason: 'anchor_corrupt' },
       };
     }
-    const auditSettled = auditRecords
-      .filter((rec) => rec && rec.run_id === entry.runId && rec.kind === 'budget.settle')
-      .reduce((sum, rec) => sum + (Number(rec.tokens) || 0), 0);
+    const auditSettled = sumAuditSettled(auditRecords, entry.runId);
     const verdict = verifyAnchor(anchorRead.records, {
       ledgerRecords: ledger.records,
       ledgerState: { seq: folded.seq, used: folded.used },

@@ -1,6 +1,6 @@
-# OPERATIONS.md — 日常运维手册（1.8.6）
+# OPERATIONS.md — 日常运维手册（1.8.7）
 
-对象：愿意动手、会看日志，但没参与开发的人。所有结论都能在 1.8.6 源码里指到位置；
+对象：愿意动手、会看日志，但没参与开发的人。所有结论都能在 1.8.7 源码里指到位置；
 标「待核实」的是我在本机没有证据的推断。
 
 ---
@@ -244,7 +244,7 @@ Copy-Item -LiteralPath $BAK -Destination $S -Force
 
 ### 6.1 升级
 
-1. 校验 tgz：大小、sha256、`package.json` 里的版本号（本版 = `1.8.6`）。
+1. 校验 tgz：大小、sha256、`package.json` 里的版本号（本版 = `1.8.7`）。
 2. 停应用（不是"关窗口"，确认进程没了）。
 3. `dsh plugin --profile desktop add "file:<tgz 绝对路径>"`；不要同时跑第二条安装命令。
 4. 启动**两次**；第二次仍无 `1 entry did not activate` 才算激活。

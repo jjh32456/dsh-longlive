@@ -7,6 +7,10 @@
 # Override with a name from src/router/policies/<name>.json:
 #         routerPolicyProfile: owner-rulings-2026-11-03
 #
+# 1.8.7: router startup anchor verification now counts `budget.overshoot.applied`
+# when a reservation has no matching `budget.settle` (fixes a false
+# E_LEDGER_TAMPERED / audit_used_regressed block after an overshoot). No defaults,
+# tool surface or config keys change.
 # 1.8.6: autoProcedure (local-rule procedure candidates) is OFF by default and
 # adds no hooks, no reads and no timers unless a profile opts in. When enabled it
 # writes candidates under .longlive/staging/auto-cards/procedures/ only; promotion

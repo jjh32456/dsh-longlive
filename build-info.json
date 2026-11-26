@@ -1,20 +1,20 @@
 {
   "schema": 1,
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.6",
-  "expectedVersion": "1.8.6",
+  "version": "1.8.7",
+  "expectedVersion": "1.8.7",
   "builtBy": "scripts/pack.mjs",
-  "generatedAt": "2026-11-18T15:49:31.452Z",
+  "generatedAt": "2026-11-26T00:00:00.000Z",
   "fileCount": 294,
-  "sourceTreeSha256": "dd8ed6594b80d44c1cb4e7344debe7fc0d558ad2bd50bc5bbea6e56231d7a900",
+  "sourceTreeSha256": "144a11378ea28d9ceb1fce801437b89a9ceb8a28fff8dfe5ce93f745ffa9e348",
   "manifestExcludes": [
     "build-info.json"
   ],
   "files": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 9648,
-      "sha256": "d2f4afec2e612271c538b73957bb63f2c85540d4b8fbfbb29a91498db6e9f8ab"
+      "bytes": 10788,
+      "sha256": "cd9e04b0e54abfb5686b215b3833645a15b0ceea7656760c0703bcac27f99863"
     },
     {
       "path": "LICENSE",
@@ -24,27 +24,27 @@
     {
       "path": "QUICKSTART.md",
       "bytes": 18012,
-      "sha256": "577fd4e154d2937c3521552935b397c036f6a269798de4f319f1a8eb48c948d6"
+      "sha256": "f966591d0fb52566be6f9f17dc97b20970feab020d3c1a2515d8134bdf564e4d"
     },
     {
       "path": "README.en.md",
       "bytes": 6073,
-      "sha256": "3dafaf44ff8c6b590b5d11fe48b828e56fcc87db7b28e430bb66e6fabf9d89a4"
+      "sha256": "d4f89ef44131c28e0b3eb2d5797cbea2f1de98edec3f7e75a43254a2adac679f"
     },
     {
       "path": "README.md",
       "bytes": 17196,
-      "sha256": "b3ffe28ff3397c038dba546b8e3bd5d1ee618f603bd76b4311d0b2f978d1a32c"
+      "sha256": "575b2256a9e65231f4506dad3d216e5575b0c530b4978d322f3c0b5fae3b68d6"
     },
     {
       "path": "SPEC.md",
       "bytes": 22890,
-      "sha256": "bced5dec69ce167b33805412c572f4ff0f3b61ed2386b5ef69bd2109b1cee0e7"
+      "sha256": "31e6e0e629927ea5b02ebb49e1c56fe3447d3ccc71c23de6153027ae2c626391"
     },
     {
       "path": "cordis.patch.yml",
-      "bytes": 6022,
-      "sha256": "bd3e3b53d11b4bab93ba1179966cc8c387cca9b1c0c62318a12ab66c1edf7875"
+      "bytes": 6293,
+      "sha256": "90040c4a8c5659612a534d1e2cf69eecd563a91ab63f63e67355eeca8ac263bd"
     },
     {
       "path": "docs/A1-MIGRATION.md",
@@ -59,7 +59,7 @@
     {
       "path": "docs/ARCHITECTURE.md",
       "bytes": 10258,
-      "sha256": "f3c6900ffe82f7d1e13b597624a486975fb0c17ce109b36073448c19840fccce"
+      "sha256": "6e99bbb00a448082e7ffc112be675587f66fb8125123ca05bbf71f326c6ad0ad"
     },
     {
       "path": "docs/AUTO-RECALL-WIRING.md",
@@ -79,7 +79,7 @@
     {
       "path": "docs/CONFIG.md",
       "bytes": 55904,
-      "sha256": "cf9812becfd504fb69ffa02320a75c134a36eccf931bf9700ce4f877b3e31d8a"
+      "sha256": "36111025f1dbad6d98eb8b626a676e9c443163e7f1f7603f60d3aea240de7455"
     },
     {
       "path": "docs/ERRORS.md",
@@ -89,12 +89,12 @@
     {
       "path": "docs/FAQ.md",
       "bytes": 12715,
-      "sha256": "2ba237cfdc43650ca1a5c94091b86cd9422866ebf7e6fc49e0e90d507d733604"
+      "sha256": "97daa877d4405dd6333013b3ea76c03dcab51581e42e5eee7d406d033daa424c"
     },
     {
       "path": "docs/FEATURES.md",
       "bytes": 34871,
-      "sha256": "9920b798981ddd588de217cc83eb881d97b53412f74bd416b4377da6a09cfa50"
+      "sha256": "98a234cf871f6e4f0cd047f6afc28066a9e31d3969531f6c66b5213f1492977e"
     },
     {
       "path": "docs/INDEX-FRESHNESS.md",
@@ -114,7 +114,7 @@
     {
       "path": "docs/OPERATIONS.md",
       "bytes": 27334,
-      "sha256": "778ea217141c7333ce29012b4f418674f70a280bbe5f624a48d728cb57b74d5b"
+      "sha256": "eb18cb51c8090b19a82390e68a377cc3b04c4cef16af2bb0a2b18121a2210339"
     },
     {
       "path": "docs/PANEL-INTEGRATION.md",
@@ -129,7 +129,7 @@
     {
       "path": "docs/QUICKSTART.md",
       "bytes": 9358,
-      "sha256": "b4478178dc50e41385817c6ef757fac93f98a62f00f08d27f8f162061bd008e3"
+      "sha256": "b86805f7ec91c1a7b29bb06b122b18555650f3455d7040d5420a1aa521b302f9"
     },
     {
       "path": "docs/RAW-INDEX-POLICY.md",
@@ -139,7 +139,7 @@
     {
       "path": "docs/README.en.md",
       "bytes": 3978,
-      "sha256": "891001d41a748192c4b1297aef9e3787ffc6aebdbc0ecc965430c54409f6755e"
+      "sha256": "326bde9affb2aea8ba17383c998d360b542990b6273e43a6bca6daeee1595995"
     },
     {
       "path": "docs/RESIDENT-WATCHER.md",
@@ -159,7 +159,7 @@
     {
       "path": "docs/TROUBLESHOOTING.md",
       "bytes": 15093,
-      "sha256": "67bdfc8e3f89386efe7ada20824a8733204b7ce92ecfd10d732bba29d1ee63a7"
+      "sha256": "749fd39ee9ab9de39a53a1fe6192d6cff01a42e0bd4a0af483d24251832eb2f0"
     },
     {
       "path": "icon.svg",
@@ -184,7 +184,7 @@
     {
       "path": "package.json",
       "bytes": 4696,
-      "sha256": "89f0418580c87876c8d4510ebfa4abb13fb2cf7df4c742beee2e23e2daa7f81e"
+      "sha256": "1ce74cd822c17b5781a95e7e8ceebdf994d6c317fd5017f29a4642aa5eba0aa7"
     },
     {
       "path": "runbook.md",
@@ -1338,8 +1338,8 @@
     },
     {
       "path": "src/router/service/reconcile.mjs",
-      "bytes": 9652,
-      "sha256": "db2880119606e0968f1bfb4a46ebfcf610e37396fe915f780885c01fb7bab500"
+      "bytes": 10506,
+      "sha256": "772ff6e3cf842156c02043a1b5cb171ca45636e65af789f601c20f69b448308b"
     },
     {
       "path": "src/router/service/service.mjs",

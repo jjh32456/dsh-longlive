@@ -2,6 +2,15 @@
 
 > 本文件只保留用户可读的功能与修复摘要；内部开发日志单独保存，不随发布包分发。
 
+## 1.8.7 — 2026-11-26
+
+**修复：router 启动校验在 budget overshoot 后误报 E_LEDGER_TAMPERED（audit_used_regressed），router 因此永久阻塞。**
+
+- 根因：`src/router/service/service.mjs` 的 budget overshoot 分支只写 `budget.overshoot` 就 halt，不写 `budget.settle`；账本侧存在对应 settle 行。下一次启动时 `verifyRunAnchors` 只累加 `budget.settle`，审计已用额度小于账本 used → `anchor verification failed: audit_used_regressed` → router blocked，重启仍复现。
+- 修复：`src/router/service/reconcile.mjs` 的 `sumAuditSettled()` 在同一 reservation 没有对应 settle 时计入 `budget.overshoot.applied`；`verifyRunAnchors()` 改用 `sumAuditSettled(auditRecords, runId)`，不再用只数 settle 的内联 reduce。
+- 验证：修复前后同一 run 由 `ok:false (E_LEDGER_TAMPERED)` 变为 `ok:true`；全部已存 run 的 `verifyRunAnchors` 均 ok；`reconcileRun` delta=0；宿主重启后 router `state=running`，warnings/alerts 为空。
+- 兼容性：其余行为、配置项、工具面与 1.8.6 一致；不迁移数据、不改写历史账本与锚。
+
 ## 1.8.6 — 2026-11-18
 
 **新增 `autoProcedure`：本地规则蒸馏的 procedure 候选（默认关闭；设计经独立红队两轮复审 PASS）。**
