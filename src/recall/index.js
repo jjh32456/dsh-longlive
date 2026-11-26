@@ -46,6 +46,7 @@ import {
   writeLinksStore,
 } from './links.mjs';
 import { selectLinkItems } from './link-recall.mjs';
+import { EXPAND_PRIORITY, expandEdges, isHistoricalQuery, loadEdges } from './edges.js';
 import {
   ARCHIVE_DEFAULTS,
   archiveToInjectedItems,
@@ -64,6 +65,7 @@ import { appendFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { dshHome } from '../home.js';
 import { DEFAULT_MEMORY_DIRNAME } from '../memory/paths.js';
+import { lifecycleRank, readCardLifecycle } from '../memory/lifecycle.js';
 import { startPrestepPhase, notePrestepDegrade, setPrestepMeta } from '../metrics/prestep-latency.mjs';
 import { sampleContentHash } from '../memory/auto-cards.js';
 
@@ -320,6 +322,18 @@ export function apply(ctx, config = {}) {
     } catch (error) {
       warn('LINKS_LOAD_FAILED', error?.code ?? error?.message ?? error);
       return { schema: 'recall-links/v1', present: false, path: '', bytes: 0, mtimeMs: 0, size: 0, edges: [], bad: 0, duplicates: 0, error: 'E_LINKS_LOAD', writable: false };
+    }
+  };
+
+  // 1.8.11 网络层：<memoryRoot>/.longlive/recall/edges.jsonl（卡→卡语义边）。
+  // 与 links 同款 mtime/size 缓存；读失败 fail-open：本轮不扩展，但绝不抛出。
+  const edgesCache = {};
+  const getEdgesStore = () => {
+    try {
+      return loadEdges({ memoryRoot: cfg.memoryRoot, cache: edgesCache });
+    } catch (error) {
+      warn('EDGES_LOAD_FAILED', error?.code ?? error?.message ?? error);
+      return { schema: 'recall-edges/v1', present: false, path: '', edges: [], stats: null, error: 'E_EDGES_LOAD' };
     }
   };
 
@@ -607,16 +621,104 @@ export function apply(ctx, config = {}) {
         }
         result.items = [...curatedItems.slice(0, 2), ...eventItems].slice(0, cfg.maxItems);
       }
-      // 1.8.8 M2：链路命中排最前（命中即注入），常规检索结果补漏；合计 ≤5 张。
-      // token 数按最终渲染重算，后面的预算裁剪与 recall-log 都用这个数。
-      if (linkItems.length > 0) {
-        const itemCap = Math.max(linkItems.length, Math.min(5, forced ? 5 : Math.max(1, cfg.maxItems)));
-        const merged = [...linkItems, ...result.items].slice(0, itemCap);
-        result = {
-          ...result,
-          items: merged,
-          tokens: estimateTokens(renderInjection({ ...result, items: merged }, { privacyScan })),
-        };
+      // 1.8.11（红队 E2）：link 命中与文本召回合并后统一排序；lifecycle 优先
+      // （canonical rank=0，historical 默认不注入），forced=true/false 同一规则；
+      // 合并后再做 1-hop 边扩展（预算按最终渲染记账）。
+      const edgesStore = getEdgesStore();
+      // 与某卡相关的边，按语义优先级排序（扩展优先级 → 其余语义 → 弱关联）。
+      // 用途：①审计 anchors 的边快照；②evidence-package 的 anchors[i].edge（D4/R11 P1-3）。
+      const edgeRankOf = (type) => {
+        if (Object.prototype.hasOwnProperty.call(EXPAND_PRIORITY, type)) return EXPAND_PRIORITY[type];
+        if (type === 'supersedes') return 4;
+        if (type === 'derived_from') return 5;
+        if (type === 'mentions') return 6;
+        if (type === 'same_topic') return 7;
+        return 8;
+      };
+      const edgesTouching = (cardPath) => {
+        const edgeList = Array.isArray(edgesStore?.edges) ? edgesStore.edges : [];
+        if (typeof cardPath !== 'string' || cardPath === '') return [];
+        return edgeList
+          .filter((edge) => edge && (edge.from === cardPath || edge.to === cardPath))
+          .sort((a, b) => edgeRankOf(a.type) - edgeRankOf(b.type)
+            || (Number(b.confidence) || 0) - (Number(a.confidence) || 0)
+            || String(a.from).localeCompare(String(b.from))
+            || String(a.to).localeCompare(String(b.to)));
+      };
+      const lifecycleCache = new Map();
+      const lifecycleOf = (cardPath) => {
+        if (typeof cardPath !== 'string' || cardPath === '') return null;
+        if (!lifecycleCache.has(cardPath)) {
+          lifecycleCache.set(cardPath, readCardLifecycle(cardPath, { memoryRoot: cfg.memoryRoot }));
+        }
+        return lifecycleCache.get(cardPath);
+      };
+      // H1（红队 P1-2 复核）：历史查询只认本轮最后一条真实用户消息。queryText 是
+      // 「首条消息 + 最近 2 条 + cwd」拼的，拿它判断会让一次「以前/旧版」把之后每轮
+      // 都永久放行 historical；只有本轮拿不到用户文本（非 forced 的回退步）才回落。
+      const historyQuery = lastUserText !== ''
+        ? isHistoricalQuery(lastUserText)
+        : isHistoricalQuery(queryText);
+      const annotated = [];
+      const annotatedPaths = new Set();
+      const annotate = (item, source) => {
+        if (!item || typeof item.path !== 'string' || item.path === '') return;
+        if (annotatedPaths.has(item.path)) return;
+        annotatedPaths.add(item.path);
+        annotated.push({ ...item, _recallSource: source, lifecycle: lifecycleOf(item.path) });
+      };
+      for (const item of linkItems) annotate(item, 'link');
+      for (const item of Array.isArray(result.items) ? result.items : []) annotate(item, 'text');
+      const visible = annotated.filter((item) => item.lifecycle !== 'historical' || historyQuery);
+      const droppedHistorical = annotated.length - visible.length;
+      const adjustedScore = (item) => {
+        const score = Number.isFinite(Number(item.score)) ? Number(item.score) : 0;
+        // link 的 0..1 与文本分不同量纲（红队 P0-2）：显式归一到可比较区间后再排序。
+        return item._recallSource === 'link' ? 0.5 + 0.5 * score : score;
+      };
+      visible.sort((a, b) => lifecycleRank(a) - lifecycleRank(b)
+        || adjustedScore(b) - adjustedScore(a)
+        || String(a.path).localeCompare(String(b.path)));
+      let merged = visible.slice(0, Math.min(5, forced ? 5 : Math.max(1, cfg.maxItems)));
+      let edgeStats = null;
+      try {
+        if (edgesStore.present && Array.isArray(edgesStore.edges) && edgesStore.edges.length > 0) {
+          const baseTokens = estimateTokens(renderInjection({ ...result, items: merged }, { privacyScan }));
+          const edgesBudget = Math.max(0, cfg.budget - baseTokens);
+          const expansion = expandEdges(merged, {
+            edges: edgesStore.edges,
+            budget: edgesBudget,
+            cards: loaded,
+            lifecycleOf,
+            allowHistorical: historyQuery,
+            queryText: lastUserText || queryText,
+            memoryRoot: cfg.memoryRoot,
+          });
+          const expanded = [...merged, ...expansion.items];
+          // H2：1.8.8 的「每轮合计 ≤5 张」是既有行为，边扩展不能让总条数顶破；
+          // forced=true/false 同一上限（排序规则已统一，条数上限也统一）。
+          merged = expanded.length > 5 ? expanded.slice(0, 5) : expanded;
+          // 记账按「最终真的注入的扩展项」重算：被 cap 掉的不算 injected/tokens。
+          const injectedEdges = merged.filter((item) => item && item.edge).length;
+          const mergedTokens = estimateTokens(renderInjection({ ...result, items: merged }, { privacyScan }));
+          edgeStats = {
+            walked: expansion.walked,
+            injected: injectedEdges,
+            dropped: expansion.dropped.length + Math.max(0, expansion.items.length - injectedEdges),
+            tokens: Math.max(0, mergedTokens - baseTokens),
+          };
+        }
+      } catch (error) {
+        notePrestepDegrade(key, turn, { kind: 'edge-expand', phase: 'recall', detail: String(error?.code ?? error?.message ?? error) });
+        warn('EDGES_EXPAND_FAILED', error?.code ?? error?.message ?? error);
+      }
+      result = {
+        ...result,
+        items: merged,
+        tokens: merged.length === 0 ? 0 : estimateTokens(renderInjection({ ...result, items: merged }, { privacyScan })),
+      };
+      if (droppedHistorical > 0) {
+        notePrestepDegrade(key, turn, { kind: 'lifecycle-filter', phase: 'recall', detail: `historical dropped=${droppedHistorical}` });
       }
       // M2-C #6: every recall decision atomically publishes .longlive/evidence/latest.json.
       let evidencePackage = null;
@@ -635,12 +737,29 @@ export function apply(ctx, config = {}) {
               retrievedAt: nowIso,
               evidenceReadyAt: nowIso,
             },
-            anchors: result.items.map((item) => ({
-              path: item.path,
-              excerpt: `${item.title ?? ''} — ${item.excerpt ?? ''}`.trim(),
-              score: Number.isFinite(Number(item.score)) ? Number(item.score) : null,
-              l0Status: 'card',
-            })),
+            anchors: result.items.map((item) => {
+              // R11 P1-3：证据包 anchor 必须能指到具体关系边。优先取本条召回 item 的
+              // 扩展边（expandedVia），否则取该卡在 edges 表里语义优先级最高的那条边
+              // （如 people.md 的 conflicts_with），保证 conflicts_with/derived_from 不被
+              // mentions/same_topic 淹没。
+              const primary = item.edge ?? edgesTouching(item.path)[0] ?? null;
+              return {
+                path: item.path,
+                excerpt: `${item.title ?? ''} — ${item.excerpt ?? ''}`.trim(),
+                score: Number.isFinite(Number(item.score)) ? Number(item.score) : null,
+                l0Status: 'card',
+                ...(item.lifecycle ? { lifecycle: item.lifecycle } : {}),
+                ...(primary ? {
+                  edge: {
+                    from: primary.from,
+                    to: primary.to,
+                    type: primary.type,
+                    ...(primary.evidence ? { evidence: primary.evidence } : {}),
+                    ...(Number.isFinite(Number(primary.confidence)) ? { confidence: Number(primary.confidence) } : {}),
+                  },
+                } : {}),
+              };
+            }),
             status: result.items.length > 0 ? 'ready' : 'no_evidence',
             fastAnswer: fast.fastAnswer === null ? null : { text: fast.fastAnswer.text, valueType: fast.fastAnswer.valueType, anchor: fast.fastAnswer.anchor },
             fallback: { used: false, reason: result.items.length > 0 ? null : 'zero-hit' },
@@ -664,6 +783,29 @@ export function apply(ctx, config = {}) {
       });
 
       // A5 unified audit: every real recall decision lands one .longlive/audit/records.jsonl row.
+      // 1.8.11 D4：证据层必须能指到具体边（from/to/type/evidence）——evidence-package/v1 的
+      // anchors 只保留白名单字段（evidence.js 归其他 owner），所以在召回审计行里带 anchor
+      // 的关系边快照，验收从审计行取证。
+      const anchorEvidence = (() => {
+        // 证据快照先放语义边：people 这类卡入边多是 mentions/same_topic，若按表内顺序截 8 条，
+        // 真正要验收的 conflicts_with / superseded_by 会被挤掉（edgesTouching 已按语义优先级排序）。
+        return result.items.map((item) => {
+          const related = edgesTouching(item.path)
+            .slice(0, 8)
+            .map((edge) => ({
+              from: edge.from,
+              to: edge.to,
+              type: edge.type,
+              ...(edge.evidence ? { evidence: { path: edge.evidence.path ?? null, quote: edge.evidence.quote ?? null } } : {}),
+            }));
+          return {
+            path: item.path,
+            ...(item.lifecycle ? { lifecycle: item.lifecycle } : {}),
+            ...(item.edge ? { expandedVia: { from: item.edge.from, to: item.edge.to, type: item.edge.type } } : {}),
+            edges: related,
+          };
+        });
+      })();
       try {
         appendAuditRecord({
           memoryRoot: cfg.memoryRoot,
@@ -676,6 +818,7 @@ export function apply(ctx, config = {}) {
           extra: {
             turn,
             queryChars: queryText.length,
+            lastUserChars: lastUserText.length,
             expanded: expandedQuery !== queryText,
             expansion: { entityTerms: aliasResolution.terms ?? [], anaphoraTerms: anaphora.terms ?? [], timeRefs: queryTimeRefs.length },
             sharedVisibility: sharedVisibilityResult,
@@ -683,6 +826,9 @@ export function apply(ctx, config = {}) {
             eligible: result.hits.eligible,
             injected: result.items.map((item) => item.path),
             tokens: result.tokens,
+            edges: edgeStats,
+            lifecycle: { historicalDropped: droppedHistorical, historyQuery },
+            anchors: anchorEvidence,
           },
         });
       } catch { /* recall auditing must never block injection */ }

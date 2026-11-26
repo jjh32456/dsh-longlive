@@ -13,10 +13,14 @@ import { memoryError, memoryRootFromConfig } from './paths.js';
 import { scanCards } from './index.js';
 import { readVerifiedCardAnchors } from './card-anchors.js';
 import { searchEventsReadOnly } from './event-index.js';
+import { isHistoricalQuery, readLifecycle } from './lifecycle.js';
 
 export const RECALL_DEFAULT_TOPK = 3;
 export const RECALL_MAX_TOPK = 20;
 export const RECALL_STATUSES = Object.freeze(['active', 'locked', 'archived', 'any']);
+// SPEC-1.8.11 D9：historical 卡在工具层同样要沉层（与 pre-step 注入的 lifecycleRank 一致），
+// 但工具层不改条数/过滤：只按权重改分数，同一 lifecycle 内原有分数序不变。
+export const HISTORICAL_SCORE_WEIGHT = 0.3;
 
 const CJK_RUN = /[\u3400-\u9fff]+/g;
 const ASCII_WORD = /[a-z0-9_]{2,}/g;
@@ -176,6 +180,8 @@ export function memoryRecall(args, config = {}) {
   const room = normalizeRoom(args?.room);
   const statuses = statusesFor(args?.status);
   const root = memoryRootFromConfig(config);
+  // 显式历史查询（以前/旧版/被取代…）不降权；普通查询把 historical 卡乘权重沉下去。
+  const historyQuery = isHistoricalQuery(query);
 
   const scanned = scanCards(root);
   const sidecar = readVerifiedCardAnchors({ memoryRoot: root }).links;
@@ -186,11 +192,16 @@ export function memoryRecall(args, config = {}) {
     if (room && !(card.rel === room || card.rel.startsWith(`${room}/`))) continue;
     const { score, hits } = scoreCard(query, card);
     if (score <= 0 || hits.length === 0) continue;
+    const lifecycle = readLifecycle(card);
+    // historical 只在非历史查询里降权；canonical/普通卡不变（权重 1）。
+    const weight = lifecycle === 'historical' && !historyQuery ? HISTORICAL_SCORE_WEIGHT : 1;
+    const weightedScore = weight === 1 ? score : Math.round(score * weight * 100) / 100;
     const link = sidecar.get(card.rel);
     results.push({
       path: card.rel,
       title: card.title,
-      score,
+      score: weightedScore,
+      lifecycle,
       excerpt: excerptFor(query, card),
       ...(link && Array.isArray(link.sourceEventIds) && link.sourceEventIds.length > 0
         ? { sourceEventIds: link.sourceEventIds }

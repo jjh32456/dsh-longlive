@@ -22,6 +22,79 @@ export const EVIDENCE_DIR = 'evidence';
 export const EVIDENCE_FILE = 'latest.json';
 export const EVIDENCE_SOURCE = 'pre-step-recall';
 
+// 1.8.11 D4（红队 R11 P1-3）：证据包必须能指到卡片位置（lifecycle）与具体关系边（edge）。
+// 白名单字段校验 + 长度上限；非法/超长字段剥离，绝不把脏数据带进证据包。
+export const EVIDENCE_LIFECYCLE_VALUES = Object.freeze(['canonical', 'historical']);
+export const EVIDENCE_EDGE_TYPES = Object.freeze([
+  'supersedes',
+  'superseded_by',
+  'deprecated_by',
+  'conflicts_with',
+  'answers_with',
+  'derived_from',
+  'mentions',
+  'same_topic',
+]);
+export const EVIDENCE_ANCHOR_LIMITS = Object.freeze({
+  anchors: 10,
+  excerpt: 240,
+  path: 300,
+  type: 40,
+  quote: 240,
+  edgeRef: 12,
+});
+
+function cleanAnchorLifecycle(value) {
+  return typeof value === 'string' && EVIDENCE_LIFECYCLE_VALUES.includes(value) ? value : undefined;
+}
+
+function cleanAnchorEvidenceRef(evidence) {
+  if (!evidence || typeof evidence !== 'object') return null;
+  const pathValue = typeof evidence.path === 'string' ? evidence.path.trim().slice(0, EVIDENCE_ANCHOR_LIMITS.path) : '';
+  if (!pathValue) return null;
+  const ref = { path: pathValue };
+  if (Array.isArray(evidence.lines) && evidence.lines.length === 2) {
+    const start = Number(evidence.lines[0]);
+    const end = Number(evidence.lines[1]);
+    if (Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end >= start) ref.lines = [start, end];
+  }
+  const quote = typeof evidence.quote === 'string' ? evidence.quote.trim().slice(0, EVIDENCE_ANCHOR_LIMITS.quote) : '';
+  if (quote) ref.quote = quote;
+  if (typeof evidence.sha256 === 'string' && /^[0-9a-f]{64}$/i.test(evidence.sha256)) ref.sha256 = evidence.sha256.toLowerCase();
+  return ref;
+}
+
+function cleanAnchorEdge(edge) {
+  if (!edge || typeof edge !== 'object') return null;
+  const from = typeof edge.from === 'string' ? edge.from.trim().slice(0, EVIDENCE_ANCHOR_LIMITS.path) : '';
+  const to = typeof edge.to === 'string' ? edge.to.trim().slice(0, EVIDENCE_ANCHOR_LIMITS.path) : '';
+  const type = typeof edge.type === 'string' ? edge.type.trim() : '';
+  if (!from || !to || !EVIDENCE_EDGE_TYPES.includes(type)) return null;
+  const out = { from, to, type };
+  const evidenceRef = cleanAnchorEvidenceRef(edge.evidence);
+  if (evidenceRef) out.evidence = evidenceRef;
+  const confidence = Number(edge.confidence);
+  if (Number.isFinite(confidence) && confidence >= 0 && confidence <= 1) out.confidence = confidence;
+  return out;
+}
+
+/** 单个 anchor 的白名单清洗（导出给测试/复用；非法字段剥离，不做静默回填）。 */
+export function cleanEvidenceAnchor(anchor = {}) {
+  const out = {
+    anchorId: typeof anchor.anchorId === 'string' && anchor.anchorId !== '' ? anchor.anchorId : `anc_${sha256Hex(String(anchor.id ?? anchor.path ?? JSON.stringify(anchor))).slice(0, 16)}`,
+    path: typeof anchor.path === 'string' ? anchor.path.slice(0, EVIDENCE_ANCHOR_LIMITS.path) : null,
+    excerpt: String(anchor.excerpt ?? '').slice(0, EVIDENCE_ANCHOR_LIMITS.excerpt),
+    sha256: anchor.sha256 ?? sha256Hex(String(anchor.excerpt ?? '')),
+    l0Status: anchor.l0Status ?? 'indexed',
+    score: Number.isFinite(anchor.score) ? anchor.score : null,
+  };
+  const lifecycle = cleanAnchorLifecycle(anchor.lifecycle);
+  if (lifecycle !== undefined) out.lifecycle = lifecycle;
+  const edge = cleanAnchorEdge(anchor.edge);
+  if (edge !== null) out.edge = edge;
+  return out;
+}
+
 export class EvidenceWriteError extends Error {
   constructor(code, message, details = undefined) {
     super(message);
@@ -56,14 +129,9 @@ export function buildEvidencePackage({
   fastAnswer = null,
   fallback = null,
 } = {}) {
-  const cleanAnchors = (Array.isArray(anchors) ? anchors : []).slice(0, 10).map((anchor) => ({
-    anchorId: typeof anchor.anchorId === 'string' && anchor.anchorId !== '' ? anchor.anchorId : `anc_${sha256Hex(String(anchor.id ?? anchor.path ?? JSON.stringify(anchor))).slice(0, 16)}`,
-    path: anchor.path ?? null,
-    excerpt: String(anchor.excerpt ?? '').slice(0, 240),
-    sha256: anchor.sha256 ?? sha256Hex(String(anchor.excerpt ?? '')),
-    l0Status: anchor.l0Status ?? 'indexed',
-    score: Number.isFinite(anchor.score) ? anchor.score : null,
-  }));
+  const cleanAnchors = (Array.isArray(anchors) ? anchors : [])
+    .slice(0, EVIDENCE_ANCHOR_LIMITS.anchors)
+    .map((anchor) => cleanEvidenceAnchor(anchor));
   return {
     queryId: evidenceQueryId({ sessionId, turn, query }),
     query: String(query ?? '').slice(0, 600),

@@ -12,14 +12,33 @@
  *   例：好 / 嗯 / ok / 继续 / 谢谢 / 收到 / 好的，继续。
  *   「继续」被用户列为纯应答样例，所以它**不在**任务动词表里。
  *
+ * 问句例外（1.8.11 R11 P1-4 修订，SPEC §3 验收 #4）：
+ *   短问句（如「五问是哪五问？」）虽然 ≤ ACK_MAX_CHARS，但它是提问、不是应答，
+ *   必须进强制召回通道。机械判据（不看语义）：
+ *     原文含问号（？/?）或含疑问词（哪/什么/怎么/为什么/吗/呢/是否/几）。
+ *   这条规则**先于长度判定**：命中即非纯应答，不看字数。
+ *   「好了吗」「收到？？」这类也会被当问句，属于机械规则的既定取舍（宁可多插一次）。
+ *
  * 边界（写进 docs/AUTO-RECALL.md，别当秘密）：
- *   - 长度 ≤6 且没有任务动词的真实短任务（如「v39战役」）会被当纯应答跳过；
+ *   - 长度 ≤6 且没有任务动词、也没有问句信号的真实短任务（如「v39战役」）会被当纯应答跳过；
  *     这是按规格的机械规则执行的既定取舍，宁可少插一次，也不在每句应答后灌上下文。
- *   - 任务动词表是固定常量，不从记忆/配置里学；改词表会改行为，属于版本变更。
+ *   - 任务动词表/疑问词表是固定常量，不从记忆/配置里学；改词表会改行为，属于版本变更。
  */
 
 /** 纯应答的最大「去空白/标点后」字符数（规格 §2.2）。 */
 export const ACK_MAX_CHARS = 6;
+
+/**
+ * 问号字符：原文里出现任意一个就按问句处理（不需要成对判断）。
+ * 用原文判断而不是 compactText，因为标点会被 compactText 去掉。
+ */
+export const QUESTION_MARKS = Object.freeze(['？', '?']);
+
+/**
+ * 疑问词：原文包含任意一个就按问句处理（机械规则，不做语法判断）。
+ * 覆盖 SPEC §3 验收 #4 的实际问句「五问是哪五问？」（命中「哪」）。
+ */
+export const QUESTION_WORDS = Object.freeze(['哪', '什么', '怎么', '为什么', '吗', '呢', '是否', '几']);
 
 /**
  * 任务动词：出现任意一个就说明这条消息在派活/改方向，不是纯应答。
@@ -64,16 +83,31 @@ export function hasTaskVerb(text) {
 }
 
 /**
- * 纯应答判定：去空白/标点后长度 ≤ ACK_MAX_CHARS 且不含任务动词。
+ * 消息是否带问句信号（原文判断：问号或疑问词）。
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function hasQuestionSignal(text) {
+  const raw = String(text ?? '');
+  if (raw === '') return false;
+  if (QUESTION_MARKS.some((mark) => raw.includes(mark))) return true;
+  return QUESTION_WORDS.some((word) => raw.includes(word));
+}
+
+/**
+ * 纯应答判定：去空白/标点后长度 ≤ ACK_MAX_CHARS 且不含任务动词、且无问句信号。
  * 空消息按纯应答处理（不触发强制召回）。
+ * 问句信号优先于长度（1.8.11 P1-4）：短问句不是应答。
  * @param {string} text
  * @returns {boolean}
  */
 export function isPureAcknowledgement(text) {
-  const compact = compactText(text);
+  const raw = String(text ?? '');
+  const compact = compactText(raw);
   if (compact === '') return true;
+  if (hasQuestionSignal(raw)) return false;
   if (Array.from(compact).length > ACK_MAX_CHARS) return false;
-  return !hasTaskVerb(text);
+  return !hasTaskVerb(raw);
 }
 
 /**

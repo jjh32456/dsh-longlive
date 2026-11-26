@@ -12,7 +12,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { readClaims } from './governance.js';
+import { readCardLifecycle } from './lifecycle.js';
 import { detectRecordConflicts, listRecords } from './records.js';
+import { loadEdges } from '../recall/edges.js';
 
 export function conflictKeyOf(claimA, claimB) {
   return [String(claimA), String(claimB)].sort().join('|');
@@ -67,10 +69,47 @@ export function detectConflicts(entries) {
 }
 
 /**
+ * 1.8.11 D6/E6 接线：conflicts_with 边的唯一读取点。
+ * 边表本体归 src/recall/edges.js（recall-edges/v1），这里只把「边 × 卡 lifecycle」接起来，
+ * 不另建第二套冲突判定/权威分；edges 可传 loadEdges() 结果或裸数组（测试/调用方注入）。
+ */
+export const LIFECYCLE_CONFLICT_SCHEMA = 'conflicts-lifecycle/v1';
+
+export function lifecycleConflicts({ memoryRoot, edges = null } = {}) {
+  let list = [];
+  let source = 'recall-edges/v1';
+  if (Array.isArray(edges)) {
+    list = edges;
+  } else if (edges && Array.isArray(edges.edges)) {
+    list = edges.edges;
+    if (typeof edges.schema === 'string') source = edges.schema;
+  } else if (memoryRoot) {
+    const store = loadEdges({ memoryRoot });
+    list = Array.isArray(store?.edges) ? store.edges : [];
+    if (typeof store?.schema === 'string') source = store.schema;
+  }
+  const conflicts = [];
+  for (const edge of list) {
+    if (!edge || edge.type !== 'conflicts_with') continue;
+    if (typeof edge.from !== 'string' || typeof edge.to !== 'string') continue;
+    conflicts.push({
+      ...edge,
+      conflictId: conflictIdOf(edge.from, edge.to),
+      lifecycle: {
+        from: readCardLifecycle(edge.from, { memoryRoot }),
+        to: readCardLifecycle(edge.to, { memoryRoot }),
+      },
+    });
+  }
+  return { schema: LIFECYCLE_CONFLICT_SCHEMA, source, conflicts, total: conflicts.length };
+}
+
+/**
  * Unified view: claims preferred; legacy records only when no claims exist.
  * Every entry gets conflict/conflict_with flags computed here (one source of truth).
+ * includeLifecycle=true 时额外带 `lifecycle` 视图（默认输出保持字节兼容）。
  */
-export function unifiedConflicts({ memoryRoot }) {
+export function unifiedConflicts({ memoryRoot, includeLifecycle = false } = {}) {
   const claims = readClaims({ memoryRoot, actor: { kind: 'host' } }).items.map((claim) => ({ ...claim, source: 'claim' }));
   let pool = claims;
   if (pool.length === 0) {
@@ -96,11 +135,13 @@ export function unifiedConflicts({ memoryRoot }) {
     const ids = byId.get(entry.id) ?? [];
     return { ...entry, conflict: ids.length > 0, conflict_with: ids };
   });
-  return {
+  const out = {
     schema: CONFLICT_SCHEMA,
     source: claims.length > 0 ? 'claim' : 'record',
     entries: marked,
     conflicts,
     total: conflicts.length,
   };
+  if (includeLifecycle === true) out.lifecycle = lifecycleConflicts({ memoryRoot });
+  return out;
 }

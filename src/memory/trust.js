@@ -78,11 +78,20 @@ export function isLowTrust(trustScore) {
 }
 
 /** 低信任不进结论注入；候选区仍可见（标 unverified）。 */
-export function injectionEligibility(claim = {}) {
+export function injectionEligibility(claim = {}, { lifecycle = null, historyQuery = false } = {}) {
   const score = typeof claim.trustScore === 'number' ? claim.trustScore : 0;
-  return {
+  const base = {
     eligible: !isLowTrust(score),
     unverified: isLowTrust(score),
     trustScore: score,
   };
+  // 1.8.11 D1/D6 接线：lifecycle 只表达「卡在现行 canon 的位置」，
+  // 不产生第二套权威分（authority 仍由 trustScore/strength 决定）。
+  // historical 默认不进结论注入；只有本轮显式历史查询才放行并标 historical。
+  if (lifecycle !== 'canonical' && lifecycle !== 'historical') return base;
+  if (lifecycle === 'canonical') return { ...base, lifecycle: 'canonical' };
+  if (historyQuery === true) {
+    return { ...base, lifecycle: 'historical', historical: true, reason: 'lifecycle-historical-explicit' };
+  }
+  return { ...base, eligible: false, lifecycle: 'historical', historical: true, reason: 'lifecycle-historical' };
 }

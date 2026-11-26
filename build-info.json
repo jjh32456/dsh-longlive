@@ -1,20 +1,20 @@
 {
   "schema": 1,
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.10",
-  "expectedVersion": "1.8.10",
+  "version": "1.8.11",
+  "expectedVersion": "1.8.11",
   "builtBy": "scripts/pack.mjs",
-  "generatedAt": "2026-11-26T12:09:47.038Z",
-  "fileCount": 302,
-  "sourceTreeSha256": "efdbd0d93bcec1b0f313e1fec80c91771a4e9879cfd7c588d9a4fb5eb2e22693",
+  "generatedAt": "2026-11-26T14:37:15.297Z",
+  "fileCount": 309,
+  "sourceTreeSha256": "9b559fda86eef0b547ddaec27999f3ce1a15c7fc9b5d98fd724199d349904433",
   "manifestExcludes": [
     "build-info.json"
   ],
   "files": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 21453,
-      "sha256": "f5c13a3f21c95ef2a875b3b21012b981cac3714ef9fedd3ff925c390185b333a"
+      "bytes": 23735,
+      "sha256": "a39c78ec9447ff7a2b15e1409e1080a0ea93fb9d15c26c9ea5b2d2d3b822d7de"
     },
     {
       "path": "LICENSE",
@@ -34,12 +34,12 @@
     {
       "path": "README.md",
       "bytes": 17198,
-      "sha256": "3fa8e7bdc4f01696e186afe1f449f6da521570ee4a6ddb4651c58c2b2b8beab3"
+      "sha256": "17d194e5f74acf2587fff08f310728405dd36689838917a156941cc673a77f48"
     },
     {
       "path": "SPEC.md",
-      "bytes": 22892,
-      "sha256": "44e4d64b4012f54aa8833d2f09acabc4ea046cf1dee3e487034d9ee34a41a446"
+      "bytes": 22955,
+      "sha256": "65530f8c8f84e3b931395a4f6d533374cbb2b49471dca10cafa41802eb6f5cfb"
     },
     {
       "path": "cordis.patch.yml",
@@ -183,13 +183,18 @@
     },
     {
       "path": "package.json",
-      "bytes": 4775,
-      "sha256": "3597311d34f32828543b106e270635e33be99a05bf29648921aea055f4678b90"
+      "bytes": 4880,
+      "sha256": "8a540ecd88e46c03e41b9cece62b4db5e2330962fc5fef8ecbb387f23c5cf909"
     },
     {
       "path": "runbook.md",
       "bytes": 18622,
       "sha256": "3816b757da65565d2f5b4c4815e2eafd7da7a73c1ac73a32bf2797e6663bc234"
+    },
+    {
+      "path": "scripts/acceptance-1.8.11.mjs",
+      "bytes": 65650,
+      "sha256": "9f9ebf2ba2eb66e1911752e01b2e5922883bef4844ebc4b47b57d98424a8347d"
     },
     {
       "path": "scripts/archive-digest-build.mjs",
@@ -205,6 +210,11 @@
       "path": "scripts/backfill-auto-cards.mjs",
       "bytes": 3997,
       "sha256": "9b696c3da5190d1754d276e78d6a389b2af592ffe0569cf7618777e8f665c4ee"
+    },
+    {
+      "path": "scripts/edges-build.mjs",
+      "bytes": 43491,
+      "sha256": "9701aaa75340268be24585d34e272f235b3e8f3c6c96ca4bb9ef1c146fe46da0"
     },
     {
       "path": "scripts/index-maintain.mjs",
@@ -270,6 +280,11 @@
       "path": "scripts/migrate-a1-legacy.mjs",
       "bytes": 2458,
       "sha256": "1f89bd8cfe7fe8bb55226cae2e0ccde1f9ce51f5d339787658f17442082aa13f"
+    },
+    {
+      "path": "scripts/migrate-lifecycle.mjs",
+      "bytes": 5550,
+      "sha256": "bbd754c8c841e74100cb7a7f690220c6b5543abdda39cbaa1e528b7240821744"
     },
     {
       "path": "scripts/pack.mjs",
@@ -768,8 +783,8 @@
     },
     {
       "path": "src/memory/conflicts.js",
-      "bytes": 4076,
-      "sha256": "9dfa2d39ac01ac8ea485ba71af063c6733ef1e81a09bcc77b33f74b045d302f2"
+      "bytes": 5826,
+      "sha256": "5e378987e70c1cef8a4c69863e49d766c04d58d0ba6cf0d17055d1903c235a83"
     },
     {
       "path": "src/memory/consolidate.js",
@@ -783,8 +798,8 @@
     },
     {
       "path": "src/memory/distill.js",
-      "bytes": 17111,
-      "sha256": "669a730593afd13571ba7e4e1adbed2d558df6f2b1be56e17ac944c8bc10d59a"
+      "bytes": 18219,
+      "sha256": "77717d6cc93263d8029ae07b3955f86e7e8d373c0427d739ce10bbfb4616b39c"
     },
     {
       "path": "src/memory/event-index.js",
@@ -798,8 +813,8 @@
     },
     {
       "path": "src/memory/evidence.js",
-      "bytes": 6274,
-      "sha256": "3564907043c08eea8850e0dc55d95f299a748c11fe8acaf75367d7ff40755a1a"
+      "bytes": 9240,
+      "sha256": "d1f9a64c252efefe9d51700620907a8542c8435d631208db963f5dd260599321"
     },
     {
       "path": "src/memory/filter-runner.js",
@@ -857,6 +872,16 @@
       "sha256": "940659d7ffab9f8162a2f43426872e0fcc49a11b1f87d77421b90993718c1725"
     },
     {
+      "path": "src/memory/lifecycle-plan.json",
+      "bytes": 15215,
+      "sha256": "2c048531c78b01631d862fd313dc20d965cd876dc00dc523ada8dd4d6cf27a79"
+    },
+    {
+      "path": "src/memory/lifecycle.js",
+      "bytes": 4369,
+      "sha256": "02f3ae7e77cfc5840fac4802d2ddc4c408f66212a393b00954ac4f6247f7274f"
+    },
+    {
       "path": "src/memory/lock.js",
       "bytes": 4645,
       "sha256": "1847e604bf221534b75c2792134c167324f64718b17a61c497bc4ca008e6dd00"
@@ -870,6 +895,11 @@
       "path": "src/memory/manifest.js",
       "bytes": 8451,
       "sha256": "ed5978e451f201281d6b224ab6bdfc0d4e251e1da31ad97d24f3cb2a65238a2b"
+    },
+    {
+      "path": "src/memory/migrate-lifecycle.js",
+      "bytes": 75923,
+      "sha256": "c22a0a4387c0add3e53aee784c621e3a6eff1c9bca47b9564301b172c8c43387"
     },
     {
       "path": "src/memory/migrate.js",
@@ -898,8 +928,8 @@
     },
     {
       "path": "src/memory/recall.js",
-      "bytes": 9326,
-      "sha256": "19054edcb39e7a9ea312c03b75c0160ff713d69fa5bcc31bd0dbdb0ecbb0333c"
+      "bytes": 10188,
+      "sha256": "21679c7ea24a4d6c16b0fdd51d17018c0b4313304a5c566a8aa264ad5786c383"
     },
     {
       "path": "src/memory/reconcile.js",
@@ -943,8 +973,8 @@
     },
     {
       "path": "src/memory/trust.js",
-      "bytes": 3960,
-      "sha256": "73fa700b4b59596f3baf9441fedd6f73f728bffc2bb954600793768cfa8b4fc7"
+      "bytes": 4697,
+      "sha256": "89a6540e461d78416ed69046bdabf0f1c4ad9307901bcf8b973b87104dfe1d82"
     },
     {
       "path": "src/memory/version-chain.js",
@@ -1027,6 +1057,11 @@
       "sha256": "4ed87bb565f79f29800783858e0b2f6c9fa29bba6ceadd23aeb44573c7193e52"
     },
     {
+      "path": "src/recall/edges.js",
+      "bytes": 12802,
+      "sha256": "aa8515854a04e22bdb91ad1e0844eec22d3989644b0cada15b2d9c952ecda2ce"
+    },
+    {
       "path": "src/recall/embedding.mjs",
       "bytes": 27230,
       "sha256": "1e1ebd4d4ed2470d2e4ecd3abd7fe6b8f7bd76517dc7637a7a9fb84aa3e8e2e8"
@@ -1043,13 +1078,13 @@
     },
     {
       "path": "src/recall/force-policy.mjs",
-      "bytes": 4983,
-      "sha256": "bd7e12add8c6bd316bb0819539214ed5014398562b84b215ec0f944f306d73d1"
+      "bytes": 6691,
+      "sha256": "b8e713c0c7a15b83c587b652008169f02297fdb0a5e98b2a1460b4fb2829820c"
     },
     {
       "path": "src/recall/index.js",
-      "bytes": 42462,
-      "sha256": "fb9e23e3d75ce81081ff11936e9a3ce1b29f57717d4242f056eacb688e627ae1"
+      "bytes": 50927,
+      "sha256": "fb5623fc31f6b463d3b50da97feb84e85652d933e51bf6b4e7c3746d82a38360"
     },
     {
       "path": "src/recall/inject-order.mjs",
@@ -1073,8 +1108,8 @@
     },
     {
       "path": "src/recall/recall-core.mjs",
-      "bytes": 32416,
-      "sha256": "b3b6d62989786f21afd4378b5800340e81fbc14de858ed36e019656ab626c16c"
+      "bytes": 32666,
+      "sha256": "4ce49736d780d8822a26d03812fd00a14f2912ac262ad856138db257c775cd97"
     },
     {
       "path": "src/recall/shared-visibility.js",

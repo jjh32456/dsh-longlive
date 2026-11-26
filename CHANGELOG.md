@@ -2,6 +2,32 @@
 
 > 本文件只保留用户可读的功能与修复摘要；内部开发日志单独保存，不随发布包分发。
 
+## 1.8.11 — 2026-11-26
+
+**记忆网络 + 蒸馏：关系边、卡生命周期、排序与迁移工具。**
+
+- 网络层：新增 `src/recall/edges.js`（8 类边：supersedes / superseded_by / deprecated_by /
+  conflicts_with / answers_with / derived_from / mentions / same_topic；1-hop 扩展，按
+  deprecated_by > conflicts_with > superseded_by > answers_with 优先级；evidence 带
+  quote/path/confidence；坏边 fail-open 不挡召回）。`scripts/edges-build.mjs` 从
+  `.longlive/recall/links.jsonl` 构建 `.longlive/recall/edges.jsonl`（幂等、原子写、坏引用计数、
+  `--dry-run`）。
+- 蒸馏层：新增 `src/memory/lifecycle.js`，卡 frontmatter 独立 `lifecycle: canonical|historical`
+  （不碰 `status`）；historical 默认不进注入，显式历史查询放行并标「历史口径」；canonical 优先排序。
+- 召回：link 命中与文本召回合并统一排序（lifecycleRank 主键 + 归一化分数）；memory_recall 工具层
+  对 historical 降权 ×0.3（显式历史查询不降权）；evidence-package/v1 anchors 增 `lifecycle` / `edge`。
+- 迁移：新增 `scripts/migrate-lifecycle.mjs`（`--mode plan|dry-run|apply|rollback`）。apply 一次性
+  快照原文、按 apply 前行号替换、历史卡收原始整行与原始 sha、无 frontmatter 卡只写 lifecycle；
+  校验失败 `E_APPLY_VERIFY` + 自动还原；二次 apply 幂等；rollback 保留 apply 审计并写 rollback 审计；
+  并发冲突 `E_ROLLBACK_CONFLICT` fail-closed；真根守卫 realpath + junction/别名拒绝。
+- 验收：新增 `scripts/acceptance-1.8.11.mjs`（14 cases：e1–e9 + n1–n5；含 handover
+  body/frontmatter/provenance、dry-run 四下游、真库只读 digest）。
+- 预算：注入默认 2000 tokens（SPEC D3）；`DEFAULTS.budget=1200` 仅未接线兜底，生产 config 传 2000。
+- 已知边界：真实根迁移会改卡/INDEX，需显式 `--allow-real-root` 并由用户批准后执行（回滚用
+  `--mode rollback`，备份在 `.longlive/lifecycle-migrations/<migrationId>/backup/`）；无种子 CSV 时
+  `links.jsonl` 不重建；`acceptance-1.8.11.mjs` 的 knownBoundaries 文本写「迁移 CLI 不在包内」是
+  1.8.11 打包前的旧状态，1.8.11 包已把两个脚本加入 `files`。
+
 ## 1.8.10 — 2026-11-26
 
 **自动截断的阈值口径修正：外部日志阈值与模型上下文线分开（默认 12M token ≈ 60MB），默认 dryrun 不变。**

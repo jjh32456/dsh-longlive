@@ -37,6 +37,7 @@ import {
   normalizeForMatch,
 } from './l2-gate.js';
 import { appendAuditRecord } from './audit-records.js';
+import { normalizeLifecycleValue } from './lifecycle.js';
 import { readProtectionManifest } from './retention.js';
 import { memoryError } from './paths.js';
 import { sha256Text } from './state.js';
@@ -265,6 +266,9 @@ function canonicalContent(record) {
     numbers: record.numbers,
     sources: record.sources,
     trigger: record.trigger,
+    // 1.8.11 D6/E6 接线：蒸馏记录的 lifecycle 是内容的一部分（canonical/historical
+    // 是现行 canon 的位置声明，换了位置就是换了内容），只在存在时进哈希，旧记录字节不变。
+    ...(record.lifecycle ? { lifecycle: record.lifecycle } : {}),
   };
 }
 
@@ -275,9 +279,16 @@ function canonicalContent(record) {
 export function buildDistillRecord({
   topic, period, sources, grade = 'L2', trigger = 'manual', reason = '', by = 'distiller:v1',
   now = new Date(), requiredFields = null, important = false, whoCandidates = resolveWhoCandidates(),
+  lifecycle = null,
 } = {}) {
   if (typeof topic !== 'string' || topic.trim() === '') throw memoryError('E_DISTILL_TOPIC', '蒸馏需要稳定 topic');
   if (typeof period !== 'string' || period.trim() === '') throw memoryError('E_DISTILL_PERIOD', '蒸馏需要稳定 period');
+  // 1.8.11 D1/D6：lifecycle 只能取 canonical|historical（缺失即普通），非法值 fail-closed，
+  // 但绝不把 lifecycle 写进 status，也不在这里做第二套权威/状态机。
+  const recordLifecycle = normalizeLifecycleValue(lifecycle);
+  if (lifecycle != null && recordLifecycle === null) {
+    throw memoryError('E_DISTILL_LIFECYCLE', `lifecycle 只能是 canonical|historical，收到：${String(lifecycle)}`);
+  }
   if (!Array.isArray(sources) || sources.length === 0) throw memoryError('E_DISTILL_SOURCES', '蒸馏至少需要 1 个源锚点');
   for (const source of sources) {
     if (!source || typeof source.id !== 'string' || source.id === '') {
@@ -314,6 +325,9 @@ export function buildDistillRecord({
     facts,
     numbers,
     trigger,
+    // 1.8.11：canonical/historical 是「这条结论在现行 canon 的位置」；
+    // 历史口径记录仍可被显式历史查询取到，但不参与默认注入（见 recall 排序）。
+    ...(recordLifecycle ? { lifecycle: recordLifecycle } : {}),
     audit: {
       by,
       sourceCount: sources.length,
@@ -349,7 +363,7 @@ function readManifestForGate(root) {
  */
 export function distillAppend({
   root, topic, period, sources, grade = 'L2', trigger = 'manual', reason = '', by = 'distiller:v1',
-  now = new Date(), requiredFields = null, important = false, gate = true, whoCandidates,
+  now = new Date(), requiredFields = null, important = false, gate = true, whoCandidates, lifecycle = null,
 } = {}) {
   const memoryRoot = String(root ?? '');
   if (memoryRoot === '') throw memoryError('E_MEMORY_ROOT', 'distillAppend requires root');
@@ -366,7 +380,7 @@ export function distillAppend({
     }
   }
   const record = buildDistillRecord({
-    topic, period, sources, grade, trigger, reason, by, now, requiredFields, important, whoCandidates,
+    topic, period, sources, grade, trigger, reason, by, now, requiredFields, important, whoCandidates, lifecycle,
   });
   const index = readChainIndex(memoryRoot);
   const entry = readIndexEntry(memoryRoot, record.id);

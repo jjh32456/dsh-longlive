@@ -690,6 +690,10 @@ export function renderInjection(result, opts = {}) {
     // Card body is data: one inert line, never multiple model-readable lines.
     const body = sanitizeDataText(item.excerpt || '', 400);
     if (body !== '') lines.push(`  ${body}`);
+    // 1.8.11：historical 卡只在显式历史查询里放行，渲染时标出口径，不能冒充现行结论。
+    if (item && item.lifecycle === 'historical') {
+      lines.push('  〔历史口径：此卡已被后续结论取代〕');
+    }
     // 1.8.0 AutoCard: origin line is generated only from the validated anchor.
     if (item && item.anchor) {
       const origin = renderAnchorDataLine(item.anchor);
