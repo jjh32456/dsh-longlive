@@ -21,6 +21,12 @@ export const OUTPUT_HARD_LIMIT_TOKENS = 350_000;
 export const OUTPUT_RESERVE_NORMAL_TOKENS = 192_000;
 export const OUTPUT_RESERVE_LONG_TOKENS = 350_000;
 export const INPUT_COMPACT_AT_TOKENS = 350_000;
+// 1.8.10: auto-truncate is about the *session log file*, not the model-context
+// line above. 12M tokens ≈ 60MB of session log at the empirical ~5 B/token
+// (2026-11-26 c045: 1,846,218 B ↔ 360,026 tokens). Keep the two metrics apart:
+// the old default inherited INPUT_COMPACT_AT_TOKENS (350k) and cut a 1.8MB log
+// every hour under heavy tool use.
+export const AUTO_TRUNCATE_LOG_TOKENS = 12_000_000;
 export const INPUT_HARD_LIMIT_NORMAL_TOKENS = 757_000; // trigger >=; 1M - 192K - 50K - 1K safety
 export const INPUT_HARD_LIMIT_LONG_TOKENS = 599_000; // trigger >=; 1M - 350K - 50K - 1K safety
 

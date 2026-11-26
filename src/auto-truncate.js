@@ -42,6 +42,7 @@ import { parseSession } from './codec.js';
 import { appendJsonlRotated, normalizeLogRotation } from './log-rotation.js';
 import { recordAutoTruncateStatus } from './auto-truncate-status.js';
 import {
+  AUTO_TRUNCATE_LOG_TOKENS,
   CONTEXT_WINDOW_TOKENS,
   INPUT_COMPACT_AT_TOKENS,
   OUTPUT_RESERVE_NORMAL_TOKENS,
@@ -68,10 +69,15 @@ import {
 // unless a profile opts in. The default mode is dryrun, so even an explicit
 // `autoTruncate: {}` cannot cut a session by accident; `mode:'request'` also
 // requires enabled:true, and the runner additionally needs the watchdog.
+//
+// 1.8.10: tokensThreshold is an *external session-log* notice line (12M tokens
+// ≈ 60MB at ~5 B/token), not the 350k model-context line. request mode runs the
+// external watchdog, which cuts and restarts without asking; keep dryrun unless
+// the operator explicitly wants automatic cuts.
 export const AUTO_TRUNCATE_DEFAULTS = Object.freeze({
   enabled: true,
   mode: 'dryrun',
-  tokensThreshold: INPUT_COMPACT_AT_TOKENS,
+  tokensThreshold: AUTO_TRUNCATE_LOG_TOKENS,
   minTurns: 12,
   cooldownMinutes: 60,
   keepTurns: 12,
@@ -359,12 +365,9 @@ export function createAutoTruncator(options = {}) {
     : null;
   const home = options.home ?? null;
   const config = normalizeAutoTruncateConfig(options.autoTruncate);
-  // fold.triggerTokens is the 1.8.3 policy mapping; autoTruncate.tokensThreshold
-  // remains the explicit truncation override when present.
-  if (options.autoTruncate?.tokensThreshold === undefined
-    && Number.isInteger(options.fold?.triggerTokens) && options.fold.triggerTokens > 0) {
-    config.tokensThreshold = options.fold.triggerTokens;
-  }
+  // 1.8.10: autoTruncate.tokensThreshold is the external-log notice line and no
+  // longer inherits fold.triggerTokens (the 350k model-context line). The 1.8.3
+  // mapping cut 350k-token logs every hour under heavy tool use (2026-11-26).
   const now = options.now ?? Date.now;
   const fsImpl = options.fs ?? fs;
   // Written into the request so the orchestrator knows what to close, restart

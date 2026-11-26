@@ -27,6 +27,11 @@
 # it. ACP-bridge messages (kind:"user" + rpcId, no clientTimeZone) count as
 # user-authored unless their text matches the injected-block blacklist. No
 # config keys change; defaults are untouched.
+# 1.8.10: auto-truncate external-log threshold is now its own line
+# (`autoTruncate.tokensThreshold` default 12,000,000 ≈ 60MB of session log at
+# ~5 B/token), not the 350k model-context line; the old fold.triggerTokens
+# inheritance was removed. Default mode stays dryrun (no request, no cut);
+# request mode runs the external watchdog, which cuts/restarts without asking.
 # 1.8.8: the shared-brain activity board keeps a time-based live window
 # (`sharedBrain.activity.retainHours`, default 24h, plus a `recentMaxRows` row
 # guard) instead of a flat 500-row cap; rows outside the window move to

@@ -1,20 +1,20 @@
 {
   "schema": 1,
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.9",
-  "expectedVersion": "1.8.9",
+  "version": "1.8.10",
+  "expectedVersion": "1.8.10",
   "builtBy": "scripts/pack.mjs",
-  "generatedAt": "2026-11-26T11:01:30.030Z",
+  "generatedAt": "2026-11-26T12:09:47.038Z",
   "fileCount": 302,
-  "sourceTreeSha256": "7883dd4e1ccbdce0e97ba58421511f003c69f8a051e1cf40cd063c0473ca7973",
+  "sourceTreeSha256": "efdbd0d93bcec1b0f313e1fec80c91771a4e9879cfd7c588d9a4fb5eb2e22693",
   "manifestExcludes": [
     "build-info.json"
   ],
   "files": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 20344,
-      "sha256": "7c6cc53872421d76a1049fdb43b9434dba42e9bca3f470fcda8c9df3246b0b4e"
+      "bytes": 21453,
+      "sha256": "f5c13a3f21c95ef2a875b3b21012b981cac3714ef9fedd3ff925c390185b333a"
     },
     {
       "path": "LICENSE",
@@ -23,28 +23,28 @@
     },
     {
       "path": "QUICKSTART.md",
-      "bytes": 18012,
-      "sha256": "84b3272e8c05ce945480c04a2cb21cc3fe09ae4fda71886d912a12d0f2f1b6a0"
+      "bytes": 18018,
+      "sha256": "5d0c1d0500c29a8cf1a3c6f71a08a288483d6aac9e1cabf74eb467400110665a"
     },
     {
       "path": "README.en.md",
-      "bytes": 6073,
-      "sha256": "9f5ac1443f80c5bdbe6f864d36528bdd28b0062c9576f2719cfc4af8afd67d5a"
+      "bytes": 6074,
+      "sha256": "5bba04638fc33f483d393b00e6e4de5549ab2c202cedc5bd2372669f8f6987e8"
     },
     {
       "path": "README.md",
-      "bytes": 17196,
-      "sha256": "cfb57dcedde98115ebc5ca51a4382167ccca09bfe7ebab9445bc5637b06d3ccf"
+      "bytes": 17198,
+      "sha256": "3fa8e7bdc4f01696e186afe1f449f6da521570ee4a6ddb4651c58c2b2b8beab3"
     },
     {
       "path": "SPEC.md",
-      "bytes": 22890,
-      "sha256": "803eb9706540d8d934b8e3c807d5b0c915a85f001194a832e0e4f3a163125e75"
+      "bytes": 22892,
+      "sha256": "44e4d64b4012f54aa8833d2f09acabc4ea046cf1dee3e487034d9ee34a41a446"
     },
     {
       "path": "cordis.patch.yml",
-      "bytes": 9946,
-      "sha256": "e128b5c83fb2a79a50012633cc2afa3be62638965ae40b3f8facee81c1446329"
+      "bytes": 10322,
+      "sha256": "fcecbd9f58606c9a224b0223980d30486fee3bfbeb467e276f7f7a792b7504cb"
     },
     {
       "path": "docs/A1-MIGRATION.md",
@@ -58,8 +58,8 @@
     },
     {
       "path": "docs/ARCHITECTURE.md",
-      "bytes": 10345,
-      "sha256": "a5cf4340f1932dcccf6c8ab4cbed0491432a83e6e04e55863ed584e1ae5c2a96"
+      "bytes": 10346,
+      "sha256": "31e82aadec4a8bffa2c49f088790f67365955b8c7801e2808632ff29a7837f2a"
     },
     {
       "path": "docs/AUTO-RECALL-WIRING.md",
@@ -78,8 +78,8 @@
     },
     {
       "path": "docs/CONFIG.md",
-      "bytes": 60023,
-      "sha256": "5ff5646bdc86620901b9c4328795d626aba5e81be777b8b1f570389e5b1fe922"
+      "bytes": 60046,
+      "sha256": "44afebf8ddbd926af0f3396c9ee37cd1a95ff6dd9188d2b10c3735c321eef8a6"
     },
     {
       "path": "docs/ERRORS.md",
@@ -88,13 +88,13 @@
     },
     {
       "path": "docs/FAQ.md",
-      "bytes": 12715,
-      "sha256": "a7fa37f2752140e842f3dcfd14e89a0486d70ca763930a00f7f150e3654ae962"
+      "bytes": 12763,
+      "sha256": "3848c20b6ef9c402b011079c80f3c99bc8d358021216501485459ad42ae29160"
     },
     {
       "path": "docs/FEATURES.md",
-      "bytes": 43148,
-      "sha256": "6e732a3163afcb101562c20b3abc75164abd9ae26ed2711d64b7442e8dc1ac38"
+      "bytes": 43149,
+      "sha256": "0fd5a583fdf15acb791eb875c4d0eecde1120f30a2a19f7882575fceb0981166"
     },
     {
       "path": "docs/INDEX-FRESHNESS.md",
@@ -113,8 +113,8 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "bytes": 27334,
-      "sha256": "b5222a99185005a98d0be47921443bfef28316761b5df67975e188f08908c254"
+      "bytes": 27337,
+      "sha256": "cbab4b991a6b7c5eda477e9ff8bb9145b5fa870b30ffcc17e5921a66306b7612"
     },
     {
       "path": "docs/PANEL-INTEGRATION.md",
@@ -128,8 +128,8 @@
     },
     {
       "path": "docs/QUICKSTART.md",
-      "bytes": 9358,
-      "sha256": "bc5e26289b02fe297d607ab747af568e0b171be8a7dbd1899c640556972d4940"
+      "bytes": 9360,
+      "sha256": "1c019b635aed98dc4949d5affe4e95717bef63da752ae6932cfefe96380c6652"
     },
     {
       "path": "docs/RAW-INDEX-POLICY.md",
@@ -138,8 +138,8 @@
     },
     {
       "path": "docs/README.en.md",
-      "bytes": 3978,
-      "sha256": "5dd6cbe44d62dd4431ff61b3c765c6894d35b86fd571efff3ff99f4ae309c022"
+      "bytes": 3979,
+      "sha256": "eeb5631aa332899a2c16f49874aa09f98bdf541bb1789f64d37faa931f6e2f57"
     },
     {
       "path": "docs/RESIDENT-WATCHER.md",
@@ -158,8 +158,8 @@
     },
     {
       "path": "docs/TROUBLESHOOTING.md",
-      "bytes": 15093,
-      "sha256": "7f3b85afbbb13baeb4f5ea7cf71c582bf997e80d87af911fc14a4159dd8acf3a"
+      "bytes": 15094,
+      "sha256": "7bfafdedac483515fb2862e8ddd7de11ceda650088f30ca207cb54d3aa417013"
     },
     {
       "path": "icon.svg",
@@ -183,8 +183,8 @@
     },
     {
       "path": "package.json",
-      "bytes": 4774,
-      "sha256": "083821b6a9e872b03dd0c562484b815a64a74daa276172c3e2274a5e688eb07e"
+      "bytes": 4775,
+      "sha256": "3597311d34f32828543b106e270635e33be99a05bf29648921aea055f4678b90"
     },
     {
       "path": "runbook.md",
@@ -463,8 +463,8 @@
     },
     {
       "path": "src/auto-truncate.js",
-      "bytes": 50610,
-      "sha256": "25975e1f185c1bccc25d3abbe57b9777b2e449de8dd5fa905902d6c5a682c315"
+      "bytes": 50828,
+      "sha256": "a73c65c5e9590b1ea1579781187ecc246ca1251dbf2f3d534235ab1cd88d8f24"
     },
     {
       "path": "src/autoprocedure/candidate.js",
@@ -573,8 +573,8 @@
     },
     {
       "path": "src/config.js",
-      "bytes": 65328,
-      "sha256": "0454e441f0a3d3bbd18bef3042b77679e11f89f7be39609808378d7fd5756fd8"
+      "bytes": 65536,
+      "sha256": "cc279f20a3948b5358dd30e989456e6cfd90401d44ee75ba7c86cd2ebb325f2b"
     },
     {
       "path": "src/d6/runtime.js",
@@ -1003,8 +1003,8 @@
     },
     {
       "path": "src/policy/threshold-policy.js",
-      "bytes": 9700,
-      "sha256": "69ab8b0c5cc6002540a5e89d1159ee37f4578885919bfae8281cfc7e0bc92805"
+      "bytes": 10108,
+      "sha256": "d53927a326c798cfff54d8c283336f99edfed7f2c89240041805fdcb46140490"
     },
     {
       "path": "src/recall/anaphora.mjs",

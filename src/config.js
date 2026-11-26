@@ -22,7 +22,7 @@
 // suite imports src/index.js from a shallow copy with no node_modules.
 
 import { createRequire } from 'node:module';
-import { FOLD_TRIGGER_TOKENS, TRUNCATE_INPUT_HARD_CAP_NORMAL_TOKENS, TRUNCATE_INPUT_HARD_CAP_LONG_TOKENS, TRUNCATE_OUTPUT_MAX_TOKENS, TRUNCATE_SAFETY_TOKENS, TRUNCATE_RESERVE_NORMAL_TOKENS, TRUNCATE_RESERVE_LONG_TOKENS } from './policy/threshold-policy.js';
+import { AUTO_TRUNCATE_LOG_TOKENS, FOLD_TRIGGER_TOKENS, TRUNCATE_INPUT_HARD_CAP_NORMAL_TOKENS, TRUNCATE_INPUT_HARD_CAP_LONG_TOKENS, TRUNCATE_OUTPUT_MAX_TOKENS, TRUNCATE_SAFETY_TOKENS, TRUNCATE_RESERVE_NORMAL_TOKENS, TRUNCATE_RESERVE_LONG_TOKENS } from './policy/threshold-policy.js';
 
 let z = null;
 try {
@@ -265,7 +265,7 @@ const ZH = {
     $description: '自动可见截断：在 turn/end 规划 log / dryrun / request（默认开启，mode=dryrun；显式 false 关闭）。',
     enabled: '开启自动可见截断（默认开启；显式 false 关闭；开启后仍默认只 dryrun，不写会话）。',
     mode: '模式：log / dryrun / request（旧值 apply 会被改写为 request）。',
-    tokensThreshold: '触发截断的估算 token 阈值（1.8.3 策略线默认 350000；非 API 强制）。',
+    tokensThreshold: '触发截断的估算 token 阈值（默认 12000000 ≈ 60MB 会话日志；这是外部日志提醒线，不是 350000 的上下文/热截断线；非 API 强制）。',
     minTurns: '触发截断的最小轮数（默认 12，严格大于）。',
     cooldownMinutes: '每会话冷却分钟数（默认 60）。',
     keepTurns: '至少保留的轮数（默认 12）。',
@@ -517,7 +517,7 @@ const EN = {
     $description: 'Automatic visible truncation: plan log / dryrun / request at turn end (off by default in 1.6.0, mode=dryrun).',
     enabled: 'Enable automatic visible truncation (on by default; explicitly false opts out; even when enabled it only dry-runs unless you change mode).',
     mode: 'Mode: log / dryrun / request (the legacy value apply is rewritten to request).',
-    tokensThreshold: 'Estimated-token threshold that triggers truncation (1.8.3 policy default 350000; not API-enforced).',
+    tokensThreshold: 'Estimated-token threshold that triggers truncation (default 12000000 ≈ 60MB session log; this is the external-log notice line, NOT the 350000 model-context line; not API-enforced).',
     minTurns: 'Minimum turns before truncation may trigger (default 12, strictly greater).',
     cooldownMinutes: 'Per-session cooldown in minutes (default 60).',
     keepTurns: 'Minimum turns kept (default 12).',
@@ -619,7 +619,7 @@ function schemaOf() {
   const autoTruncate = z.object({
     enabled: z.boolean().default(true).description(ZH.autoTruncate.enabled),
     mode: z.string().default('dryrun').description(ZH.autoTruncate.mode),
-    tokensThreshold: z.number().default(350000).description(ZH.autoTruncate.tokensThreshold),
+    tokensThreshold: z.number().default(AUTO_TRUNCATE_LOG_TOKENS).description(ZH.autoTruncate.tokensThreshold),
     minTurns: z.number().default(12).description(ZH.autoTruncate.minTurns),
     cooldownMinutes: z.number().default(60).description(ZH.autoTruncate.cooldownMinutes),
     keepTurns: z.number().default(12).description(ZH.autoTruncate.keepTurns),

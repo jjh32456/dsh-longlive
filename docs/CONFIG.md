@@ -1,6 +1,6 @@
 # CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
-适用版本：**1.8.9**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.8.10**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---
@@ -117,7 +117,7 @@ autoTruncate:
 |---|---|---|---|---|---|
 | `enabled` | boolean | `true` | `true` / `false` | 是 | 1.8.0 起默认开启（仍默认 `mode: dryrun`，只规划不直接切会话）；显式 `false` 时 `evaluate` 在写日志之前就早退（`disabled`） |
 | `mode` | string | `dryrun` | `log` \| `dryrun` \| `request` | 是 | 1.6.0 起默认 `dryrun`（只规划不写会话）。**没有 `on`**。写 `on` → `AUTO_BAD_MODE`，整条 entry 不激活。旧值 `apply` 会被改写成 `request` 并记 `modeAlias:"apply->request"`（`src/auto-truncate.js:64,117-125`） |
-| `tokensThreshold` | integer | `350000`（1.8.3 策略线） | ≥ 1 | 是 | 阈值比较是 `estimate.tokens >= tokensThreshold`（`src/auto-truncate.js:435`）。`tokens` 是**启发式估算**：对 `MESSAGE_TYPES` 事件的 data JSON 取字符数 ÷ 4（`src/truncate-visible.js:80`），不是宿主计费 token，两者偏差**待核实**。阈值压到几千只适合演练 |
+| `tokensThreshold` | integer | `12000000`（≈60MB，外部日志线） | ≥ 1 | 是 | 阈值比较是 `estimate.tokens >= tokensThreshold`（`src/auto-truncate.js:435`）。`tokens` 是**启发式估算**：对 `MESSAGE_TYPES` 事件的 data JSON 取字符数 ÷ 4（`src/truncate-visible.js:80`），不是宿主计费 token，两者偏差**待核实**。阈值压到几千只适合演练 |
 | `minTurns` | integer | `12` | ≥ 1 | 是 | 条件对 turn 数是**严格大于**：`estimate.turns > minTurns`（同 435 行）。`minTurns: 1` 表示第 2 个 turn 起才可能触发 |
 | `cooldownMinutes` | integer | `60` | ≥ 0 | 是 | 每会话冷却；**低于阈值的评估也会消耗冷却窗口**（同文件 438-440 注释）。`0` 只用于 VM 采样：超过阈值后每个 turn 都会评估并尝试写请求（single-flight，已有请求不会被覆盖），生产别用 |
 | `keepTurns` | integer | `12` | ≥ 1 | 是 | 交给 runner 的"至少保留轮数"；实际切点由 `planVisibleTruncation` 重算，双边界取**更晚**的一个（保留更少），见 `src/truncate-visible.js:437-597` |
@@ -683,7 +683,7 @@ config:
     autoTruncate:
       enabled: true
       mode: log                   # 只规划 + 写一行日志，绝不写会话
-      tokensThreshold: 350000     # 1.8.3 策略线默认值；先观察真实日志估算离阈值多远
+      tokensThreshold: 12000000   # 外部日志提醒线（≈60MB）；先观察真实日志估算离阈值多远
       minTurns: 12
       cooldownMinutes: 60
       keepTurns: 12
