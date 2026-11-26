@@ -1,20 +1,20 @@
 {
   "schema": 1,
   "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.8",
-  "expectedVersion": "1.8.8",
+  "version": "1.8.9",
+  "expectedVersion": "1.8.9",
   "builtBy": "scripts/pack.mjs",
-  "generatedAt": "2026-11-26T00:00:00.000Z",
+  "generatedAt": "2026-11-26T11:01:30.030Z",
   "fileCount": 302,
-  "sourceTreeSha256": "ac7de1c39e6b35cac4ef41c6fd944e70f960650c8ebc267f707a2eb4dfe65e63",
+  "sourceTreeSha256": "7883dd4e1ccbdce0e97ba58421511f003c69f8a051e1cf40cd063c0473ca7973",
   "manifestExcludes": [
     "build-info.json"
   ],
   "files": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 18327,
-      "sha256": "c174e17ee3cf8c770d84ee2bee56eb7a96e33f4dc09a8a9fc1c4574ac0691e75"
+      "bytes": 20344,
+      "sha256": "7c6cc53872421d76a1049fdb43b9434dba42e9bca3f470fcda8c9df3246b0b4e"
     },
     {
       "path": "LICENSE",
@@ -24,27 +24,27 @@
     {
       "path": "QUICKSTART.md",
       "bytes": 18012,
-      "sha256": "8390514336521f0106ea1d7e81420f8ffff6f723dbf11931f7c838fcd3a76dde"
+      "sha256": "84b3272e8c05ce945480c04a2cb21cc3fe09ae4fda71886d912a12d0f2f1b6a0"
     },
     {
       "path": "README.en.md",
       "bytes": 6073,
-      "sha256": "848abc2ef9bbcc41966365cace75598631df7a1cffcf74c1ff7280032b09bc97"
+      "sha256": "9f5ac1443f80c5bdbe6f864d36528bdd28b0062c9576f2719cfc4af8afd67d5a"
     },
     {
       "path": "README.md",
       "bytes": 17196,
-      "sha256": "54ddd8a889ddd41e387b2afae0d1f31b6ef8a83272c45158dada950012fbf78c"
+      "sha256": "cfb57dcedde98115ebc5ca51a4382167ccca09bfe7ebab9445bc5637b06d3ccf"
     },
     {
       "path": "SPEC.md",
       "bytes": 22890,
-      "sha256": "bc1161b23fa2807c38056309ebc5b977c5d19e33d73cb9b9eb7cade2060ff836"
+      "sha256": "803eb9706540d8d934b8e3c807d5b0c915a85f001194a832e0e4f3a163125e75"
     },
     {
       "path": "cordis.patch.yml",
-      "bytes": 9511,
-      "sha256": "ce85f6f95372a1e92f386c0c078e979659f4c4a3481a7f06aa59b47c99198d50"
+      "bytes": 9946,
+      "sha256": "e128b5c83fb2a79a50012633cc2afa3be62638965ae40b3f8facee81c1446329"
     },
     {
       "path": "docs/A1-MIGRATION.md",
@@ -59,7 +59,7 @@
     {
       "path": "docs/ARCHITECTURE.md",
       "bytes": 10345,
-      "sha256": "46544631164b5d0904a661378bd041a087e5861765bdf5f8491ff54a97b31c0f"
+      "sha256": "a5cf4340f1932dcccf6c8ab4cbed0491432a83e6e04e55863ed584e1ae5c2a96"
     },
     {
       "path": "docs/AUTO-RECALL-WIRING.md",
@@ -79,7 +79,7 @@
     {
       "path": "docs/CONFIG.md",
       "bytes": 60023,
-      "sha256": "04f31dfe3bdd18af02113850672be28b9740ca837cbfd7f2bbdfa8a82bafc88d"
+      "sha256": "5ff5646bdc86620901b9c4328795d626aba5e81be777b8b1f570389e5b1fe922"
     },
     {
       "path": "docs/ERRORS.md",
@@ -89,12 +89,12 @@
     {
       "path": "docs/FAQ.md",
       "bytes": 12715,
-      "sha256": "970b9b3f7a7dd4b153654810717473fcd90c52b9fc24dd8c39be36996b0d2ec7"
+      "sha256": "a7fa37f2752140e842f3dcfd14e89a0486d70ca763930a00f7f150e3654ae962"
     },
     {
       "path": "docs/FEATURES.md",
       "bytes": 43148,
-      "sha256": "64ecee789ecefe50702f1827fc22cd3b2f8248b0ecaac287b536c8a1ee8a8bfa"
+      "sha256": "6e732a3163afcb101562c20b3abc75164abd9ae26ed2711d64b7442e8dc1ac38"
     },
     {
       "path": "docs/INDEX-FRESHNESS.md",
@@ -114,7 +114,7 @@
     {
       "path": "docs/OPERATIONS.md",
       "bytes": 27334,
-      "sha256": "d18e44442ee7f6c9b344332036d732f1fabfc786eb238c97cb4e5d461a3145b2"
+      "sha256": "b5222a99185005a98d0be47921443bfef28316761b5df67975e188f08908c254"
     },
     {
       "path": "docs/PANEL-INTEGRATION.md",
@@ -129,7 +129,7 @@
     {
       "path": "docs/QUICKSTART.md",
       "bytes": 9358,
-      "sha256": "faf33c9359604c999bd2f22d8aa7895cf293462df2c3cd2b2c1167e2bd70ed51"
+      "sha256": "bc5e26289b02fe297d607ab747af568e0b171be8a7dbd1899c640556972d4940"
     },
     {
       "path": "docs/RAW-INDEX-POLICY.md",
@@ -139,7 +139,7 @@
     {
       "path": "docs/README.en.md",
       "bytes": 3978,
-      "sha256": "bd26967e1d284cb53b106c1ebc73c87ccdd1c4cc501553ea3e85faec9a1cded3"
+      "sha256": "5dd6cbe44d62dd4431ff61b3c765c6894d35b86fd571efff3ff99f4ae309c022"
     },
     {
       "path": "docs/RESIDENT-WATCHER.md",
@@ -159,7 +159,7 @@
     {
       "path": "docs/TROUBLESHOOTING.md",
       "bytes": 15093,
-      "sha256": "4cee8960efd9dd63792ac2125e0a8c4cc24d5942363a3a4d2ab68644053d35d1"
+      "sha256": "7f3b85afbbb13baeb4f5ea7cf71c582bf997e80d87af911fc14a4159dd8acf3a"
     },
     {
       "path": "icon.svg",
@@ -184,7 +184,7 @@
     {
       "path": "package.json",
       "bytes": 4774,
-      "sha256": "ff7156d6a1cbe88092ef54ddeae95e66c3fa99dceb008044c4eb1075e31e9271"
+      "sha256": "083821b6a9e872b03dd0c562484b815a64a74daa276172c3e2274a5e688eb07e"
     },
     {
       "path": "runbook.md",
@@ -1448,8 +1448,8 @@
     },
     {
       "path": "src/truncate-visible.js",
-      "bytes": 94923,
-      "sha256": "2442e9b31a78cc9257b24cae735b07c373f152640589074aef9408cda13c5e65"
+      "bytes": 97369,
+      "sha256": "013f0b95a266df3d111ece29005846d3f49f529b078f21b3403c3f13b4a25432"
     },
     {
       "path": "src/truncate.js",

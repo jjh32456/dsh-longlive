@@ -226,6 +226,13 @@ export function isUserAuthoredMessage(event) {
   if (!source || typeof source !== 'object' || source.kind !== 'user') return false;
   if (typeof source.clientTimeZone === 'string' && source.clientTimeZone.trim() !== '') return true;
   if (looksLikeInjectedText(textOfEvent(event))) return false;
+  // 1.8.9: the ACP bridge delivers real client messages with an rpcId but no
+  // clientTimeZone (source {kind:"user", rpcId:"aa.<id>"}). Treating them as
+  // machine text left every bridged session with no user-authored turn: the
+  // boundary guard walked back onto a compaction checkpoint and every cut was
+  // infeasible. The injected-text blacklist above still wins, so machine
+  // blocks that reuse a kind:"user" row stay rejected.
+  if (typeof source.rpcId === 'string' && source.rpcId.trim() !== '') return true;
   // No structured user-origin evidence and no disqualifying text signature:
   // still not provable, so it is not carried.
   return false;
@@ -487,11 +494,31 @@ function findCompactionStraddle(events, cutIndex) {
 }
 
 /**
+ * 1.8.9: a retained event whose surfaceOp replaces a span that starts before
+ * the cut cannot be remapped; the build refuses it as
+ * VISIBLE_REPLACEMENT_STRADDLES_CUT. Return the *last* retained straddler so
+ * the caller can move the cut after it - dropping the checkpoint and the span
+ * it replaced, which can only reduce the post-cut size.
+ */
+function findReplacementStraddle(events, cutIndex) {
+  let last = -1;
+  for (let i = cutIndex; i < events.length; i += 1) {
+    const op = events[i].surfaceOp;
+    if (!op || typeof op !== "object") continue;
+    const start = op.startSeq ?? op.start;
+    if (typeof start === "number" && start < cutIndex) last = i;
+  }
+  return last;
+}
+
+/**
  * Pick the first retained turn index from the two mirrors of the request:
  * keep the last `keepTurns` turns, and keep the last turns that fit
  * `keepTokens`. The later boundary wins (fewer turns kept), then it is moved
  * back until it starts on a turn that carries a user-authored message and does
- * not fall inside a compaction group.
+ * not fall inside a compaction group (1.8.9: if the next candidate would
+ * retain a replacement checkpoint that spans the cut, the boundary moves
+ * *after* that checkpoint instead).
  *
  * `extraDroppedTurns` is the 0.8.0-rc.11 downgrade lever: one more whole turn
  * is dropped, and the same guard rules are applied again. It can never return
@@ -524,6 +551,22 @@ function chooseBoundary({ turns, events, keepTurns, keepTokens, extraDroppedTurn
     guard += 1;
     if (cutTurnIndex <= 0) break;
     if (cutTurnIndex >= turns.length) cutTurnIndex = turns.length - 1;
+    // 1.8.9: prefer dropping a retained replacement checkpoint over walking
+    // back into it. Walking back keeps more turns and can re-enter the
+    // checkpoint (the old deadlock: every candidate boundary sat inside the
+    // replaced span); moving past it drops the checkpoint and keeps less.
+    const replacementAt = findReplacementStraddle(events, turns[cutTurnIndex].startIndex);
+    if (replacementAt >= 0) {
+      let next = cutTurnIndex;
+      while (next < turns.length && turns[next].startIndex <= replacementAt) next += 1;
+      if (next <= turns.length - 1) {
+        cutTurnIndex = next;
+        changed = true;
+        continue;
+      }
+      break; // the checkpoint lives in the last turn: no boundary can drop it
+    }
+
     const straddle = findCompactionStraddle(events, turns[cutTurnIndex].startIndex);
     if (straddle >= 0) {
       let owner = cutTurnIndex;
@@ -534,9 +577,14 @@ function chooseBoundary({ turns, events, keepTurns, keepTokens, extraDroppedTurn
         continue;
       }
     }
-    if (turns[cutTurnIndex].firstUserIndex === null) {
-      cutTurnIndex -= 1;
-      changed = true;
+    if (turns[cutTurnIndex].firstUserIndex === null && cutTurnIndex > 0) {
+      const back = cutTurnIndex - 1;
+      // Never undo the forward step above: moving back into a replacement
+      // checkpoint would make the next iteration jump forward again.
+      if (findReplacementStraddle(events, turns[back].startIndex) < 0) {
+        cutTurnIndex = back;
+        changed = true;
+      }
     }
   }
   return { cutTurnIndex, syntheticHeadTurns, keepTurnsCut, tokenCut, tokenTotal };

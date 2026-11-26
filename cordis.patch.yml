@@ -21,6 +21,12 @@
 # The seed table is rebuilt offline from LINKS-SEED-v3.csv with
 #   node scripts/recall-links-build.mjs --csv <seed.csv> --memory-root <root>
 # (`--dry-run` prints stats; `--rollback <backup>` restores a backup atomically).
+# 1.8.9: visible-truncate boundary fix — a retained compaction checkpoint whose
+# replaced span starts before the cut no longer deadlocks the auto-truncate
+# planner: the boundary moves after the checkpoint instead of walking back into
+# it. ACP-bridge messages (kind:"user" + rpcId, no clientTimeZone) count as
+# user-authored unless their text matches the injected-block blacklist. No
+# config keys change; defaults are untouched.
 # 1.8.8: the shared-brain activity board keeps a time-based live window
 # (`sharedBrain.activity.retainHours`, default 24h, plus a `recentMaxRows` row
 # guard) instead of a flat 500-row cap; rows outside the window move to
