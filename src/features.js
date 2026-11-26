@@ -70,7 +70,15 @@ export const FEATURE_DEFAULTS = Object.freeze({
   identityCard: Object.freeze({ enabled: true, path: '<memoryRoot>/STATE.md', maxChars: 800 }),
   presenceBus: Object.freeze({ enabled: true, pollMs: 3000 }),
   sharedBrain: Object.freeze({
-    activity: Object.freeze({ enabled: true, injectMaxChars: 300, maxItems: 5 }),
+    // 1.8.8 M3: 24h live window (time first, row guard second) + recap budget.
+    activity: Object.freeze({
+      enabled: true,
+      injectMaxChars: 300,
+      maxItems: 5,
+      retainHours: 24,
+      recentMaxRows: 3200,
+      summaryMaxChars: 400,
+    }),
     thinkingInjection: true,
   }),
   autoMaintenance: Object.freeze({
@@ -761,6 +769,18 @@ export function registerFeatures(ctx, config = {}, options = {}) {
     // A3/A4：embedding 是 autoRecall 的一个可选后端，不属于 normalizeFeatureConfig
     // 的三块开关（feature-flags 的既有 deepEqual 锁死了那个输出形状）。
     if (config.embedding && typeof config.embedding === 'object') recallConfig.embedding = config.embedding;
+    // 1.8.8 M2：强制触发 + 链路学习。两个键都从 raw profile 配置读：
+    //   autoRecall.forceOnUserMessage（默认 true；显式 false 回落 1.8.7）
+    //   recall.links.（默认开启；links.enabled:false 回落 1.8.7）
+    // 不进 normalizeFeatureConfig 的输出形状（1.8.7 的 deepEqual 锁死了那个形状），
+    // recall 也不声明 schemastery 节点（settings schema 节点数保持不变）。
+    const rawAutoRecall = config.autoRecall && typeof config.autoRecall === 'object' ? config.autoRecall : {};
+    if (rawAutoRecall.forceOnUserMessage !== undefined) recallConfig.forceOnUserMessage = rawAutoRecall.forceOnUserMessage;
+    // 2026-11-26 红队复攻 P2-5：privacyPolicy 也走 raw 透传（'drop' 默认 / 'title' 只遮摘要；
+    // 标题与路径命中在任何策略下都整卡丢弃）。recall-core 内部归一化，其余值一律回落 drop。
+    if (rawAutoRecall.privacyPolicy !== undefined) recallConfig.privacyPolicy = rawAutoRecall.privacyPolicy;
+    const rawRecallLinks = config.recall && typeof config.recall === 'object' ? config.recall.links : null;
+    if (rawRecallLinks && typeof rawRecallLinks === 'object') recallConfig.links = rawRecallLinks;
     applyAutoRecall(ctx, recallConfig);
     enabled.push('autoRecall');
   }

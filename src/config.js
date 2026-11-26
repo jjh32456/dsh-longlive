@@ -94,7 +94,28 @@ const ZH = {
     enabled: '开启自动想起（默认开启；显式 false 关闭）。',
     topK: '每次召回的最大卡片数（默认 3，范围 1–10）。',
     budgetTokens: '每次召回的 token 预算（默认 2000，范围 200–2000）。',
-    everyNTurns: '每 N 轮召回一次（默认 6）。',
+    everyNTurns: '每 N 轮召回一次（默认 6；1.8.8 起强制触发路径不再受它限制）。',
+    forceOnUserMessage: '1.8.8：每条真实用户任务消息都强制召回一次（默认 true；显式 false 完全回落 1.8.7 的按轮次/话题切换触发）。纯应答（好/嗯/继续/谢谢/收到）不触发。',
+  },
+  // 1.8.8 M2：链路学习整块按「整块 passthrough」处理——不声明 schemastery 节点（settings schema
+  // 节点数与 1.8.7 保持一致），由 src/recall/links.mjs 的 normalizeLinksConfig 从 raw config 读取，
+  // 与 proactive / handoff / tiering 的既有做法相同。
+  recall: {
+    $description: '强制召回的「一说就直连老记忆」链路层（1.8.8）：种子链路直连 + 在线学习 + 归档兜底。',
+    links: {
+      $description: '词→老记忆卡的直连链路（默认开启；显式 enabled:false 关闭，行为回落 1.8.7）。',
+      enabled: '开启链路直连（默认 true）：用户消息里命中词就按权重直连对应老卡。',
+      learn: '在线学习（默认 true）：用户确认/否认后调整链路权重并原子写回 links.jsonl。',
+      minWeight: '触发直连的最小权重（默认 0.5）。',
+      maxCardsPerTurn: '单轮链路直连注入的最大卡片数（默认 5，上限 5）。',
+      maxCardsPerTerm: '单个词最多保留的卡片边数（默认 5）。',
+      maxTermsPerCard: '单张卡最多保留的词边数（默认 50）。',
+      decayAfterDays: '多少天未使用后开始衰减（默认 30）。',
+      decayFactor: '每个衰减周期的权重乘数（默认 0.85）。',
+      decayFloor: '衰减权重下限（默认 0.01；低于阈值的链路靠 maxEdges 淘汰）。',
+      confirmDelta: '用户确认一次加多少权重（默认 +1）。',
+      denyDelta: '用户否认一次减多少权重（默认 −1.5；≤0 即删除该边）。',
+    },
   },
   identityCard: {
     $description: '身份卡：在每次对话前置注入 STATE.md 摘要。',
@@ -115,6 +136,9 @@ const ZH = {
       enabled: '开启共享大脑活动流（默认开启；显式 false 关闭，关闭时不写活动板、不注入）。',
       injectMaxChars: '每次注入的总字符上限，含固定头尾（默认 300，范围 60–2000）。',
       maxItems: '每次最多注入的活动条数（默认 5，范围 1–10）。',
+      retainHours: '活动板活窗覆盖的小时数（默认 24，范围 1–720）；更早的行移到 activity-YYYYMM.jsonl 月档，不删除，seq 仍可回查。',
+      recentMaxRows: '活窗行数上限护栏（默认 3200，范围 100–20000）；先按时间裁、再按行数裁，裁掉的行同样进月档。',
+      summaryMaxChars: '新会话首轮（或距上次摘要满 retainHours）注入的近 24h 摘要整块上限（默认 400，范围 120–400）。',
     },
     thinkingInjection: '开启 thinking 摘要注入（默认开启；显式 false 关闭；需 sharedBrain.activity.enabled=true。开启后把其他会话 assistant 可见 reasoning 的首句/≤200 字符摘要注入，单次最多 5 行）。',
   },
@@ -323,7 +347,28 @@ const EN = {
     enabled: 'Enable auto-recall (on by default; explicitly false opts out).',
     topK: 'Maximum cards per recall (default 3, range 1–10).',
     budgetTokens: 'Token budget per recall (default 2000, range 200–2000).',
-    everyNTurns: 'Recall once every N turns (default 6).',
+    everyNTurns: 'Recall once every N turns (default 6; since 1.8.8 the forced path ignores it).',
+    forceOnUserMessage: '1.8.8: force one recall for every real user task message (default true; explicitly false falls back completely to the 1.8.7 turn/topic trigger). Pure acknowledgements (ok/thanks/got it) do not force.',
+  },
+  // 1.8.8 M2: the link-learning block is declared as a whole-block passthrough — no schemastery
+  // node (the settings schema node count stays identical to 1.8.7); src/recall/links.mjs
+  // normalizeLinksConfig reads it from the raw config, same as proactive / handoff / tiering.
+  recall: {
+    $description: 'Link layer for forced recall (1.8.8): seed link direct-connect + online learning + archive fallback.',
+    links: {
+      $description: 'Word→old-memory-card direct links (on by default; explicitly enabled:false falls back to 1.8.7 behaviour).',
+      enabled: 'Enable link direct-connect (default true): a word hit in the user message links its old cards by weight.',
+      learn: 'Online learning (default true): confirm/deny adjusts link weights and atomically writes links.jsonl back.',
+      minWeight: 'Minimum weight that triggers a direct link (default 0.5).',
+      maxCardsPerTurn: 'Maximum cards a single turn may link-inject (default 5, capped at 5).',
+      maxCardsPerTerm: 'Maximum card edges kept per word (default 5).',
+      maxTermsPerCard: 'Maximum word edges kept per card (default 50).',
+      decayAfterDays: 'Days without use before decay starts (default 30).',
+      decayFactor: 'Weight multiplier per decay period (default 0.85).',
+      decayFloor: 'Lower bound of the decayed weight (default 0.01; weakest edges go through maxEdges).',
+      confirmDelta: 'Weight added per user confirmation (default +1).',
+      denyDelta: 'Weight removed per user denial (default −1.5; ≤0 deletes the edge).',
+    },
   },
   identityCard: {
     $description: 'Identity card: prepend a STATE.md digest at the start of the conversation.',
@@ -344,6 +389,9 @@ const EN = {
       enabled: 'Enable the shared-brain activity stream (on by default; explicitly false opts out and writes/injects nothing).',
       injectMaxChars: 'Total characters per injection, header/footer included (default 300, range 60–2000).',
       maxItems: 'Maximum activity rows per injection (default 5, range 1–10).',
+      retainHours: 'Live-window hours for the activity board (default 24, range 1–720); older rows move to activity-YYYYMM.jsonl, never deleted and still findable by seq.',
+      recentMaxRows: 'Live-window row guard (default 3200, range 100–20000); time trims first, then the row cap, and dropped rows also go to the monthly archive.',
+      summaryMaxChars: 'Whole-block limit for the last-24h recap injected on a new session (or once per retainHours) (default 400, range 120–400).',
     },
     thinkingInjection: 'Inject thinking summaries (on by default; explicitly false opts out; requires sharedBrain.activity.enabled=true). Summaries are the first sentence or ≤200 chars of other sessions\' visible reasoning, max 5 lines per injection.',
   },
@@ -531,6 +579,10 @@ function schemaOf() {
       enabled: z.boolean().default(true).description(ZH.sharedBrain.activity.enabled),
       injectMaxChars: z.number().default(300).description(ZH.sharedBrain.activity.injectMaxChars),
       maxItems: z.number().default(5).description(ZH.sharedBrain.activity.maxItems),
+      // 1.8.8 M3 live window: time first, row cap as the guard; recap budget separate.
+      retainHours: z.number().default(24).description(ZH.sharedBrain.activity.retainHours),
+      recentMaxRows: z.number().default(3200).description(ZH.sharedBrain.activity.recentMaxRows),
+      summaryMaxChars: z.number().default(400).description(ZH.sharedBrain.activity.summaryMaxChars),
     }).collapse(),
     thinkingInjection: z.boolean().default(true).description(ZH.sharedBrain.thinkingInjection),
   }).collapse();

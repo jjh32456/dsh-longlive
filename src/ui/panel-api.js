@@ -124,6 +124,10 @@ export function createPanelApi(options = {}) {
     integrity,
     now,
     flagsSnapshot: options.flagsSnapshot,
+    // 1.8.8 M3: the board route reports the activity live window; hand it the
+    // configured retainHours so the panel matches what the writer keeps instead
+    // of always showing the 24h default. Undefined keeps the default.
+    retainHours: options.config?.sharedBrain?.activity?.retainHours,
     // M2-A: #11 events route reads the FTS5 event index when it has been built
     // (`.longlive/index/events.db`); without an index the honest empty state
     // (`present:false` + E_EVENTS_INDEX_NOT_BUILT) is returned unchanged.

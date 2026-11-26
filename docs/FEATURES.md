@@ -1,4 +1,42 @@
-# 1.8.7 可选能力与开关
+# 1.8.8 可选能力与开关
+
+## 1.8.8 自动回忆指向（forced recall + link，默认开启）
+
+用户要的效果是「我说要做什么的时候，直接就指向老记忆去」。1.8.8 的自动想起从"按轮次/话题
+切换触发"改成"**任务消息当轮强制触发 + 常用词直连老卡**"：
+
+- 你一发任务消息，插件在 `agent/pre-step` 的第一步（`step === 1`）就做一次召回，
+  **不再等 everyNTurns、也不再被 quiet 门控挡住**；同一轮最多一次。
+- 你常用的词/项目词通过种子映射与学习链路**直接指向**相关老记忆卡（不走"模糊搜一下"），
+  命中即注入（日志 `source:"link"`）；之后仍跑一遍原来的关键词/语义召回补漏。
+- 每轮注入上限：≤5 张卡 / ≤2000 tokens；已注入过的卡去重；纯应答（「好」「继续」「谢谢」
+  「收到」等去空白后 ≤6 字符且无任务动词）不刷屏，走原来的按轮次/话题切换路径。
+- 隐私命中卡（`local_only` / `privacyScan`）整卡不注入；召回失败 fail-open，不挡你这一轮。
+- 开关：`autoRecall.forceOnUserMessage`（默认 `true`；`false` = 完全回落 1.8.7 行为）、
+  `recall.links.enabled`（默认 `true`；`false` = 只保留关键词/语义召回）。
+- 详细行为与配置见 [AUTO-RECALL.md](AUTO-RECALL.md)，接线形状见
+  [AUTO-RECALL-WIRING.md](AUTO-RECALL-WIRING.md)。
+
+## 1.8.8 高频词学习（self-learning links，默认开启）
+
+- 种子表来自**你的真实历史消息**统计出的高频实义词（带词频 `n` / 出现卡数 `df` / 卡内命中
+  位置，不是我们造的）；词表与链路都是数据产物（`LINKS-SEED-v3.csv` → `links.jsonl`），
+  换人/换机重跑构建脚本即可，不针对某个项目硬编码。
+- 每轮记录「你消息里的词 × 被注入的卡」共现与你的事后反馈：你说「对/就是这个/没错」→ 加权；
+  你说「不对/不是这个/错了」→ 减权；久不用（默认 30 天）按 0.85/周期衰减。
+- 链路存在 `<memoryRoot>/.longlive/recall/links.jsonl`，每条带证据（计数/命中方式/时间/来源），
+  **只存词 + 卡路径 + 计数/时间，不存原句**；可审计（`links-audit.jsonl`）、可导出、
+  可回滚（`scripts/recall-links-build.mjs --rollback <备份>`）、坏了能从种子表重建。
+- 越用越准：同一个词下次直接从"链"命中（日志 `source:"link"`），而不是重新匹配。
+- 上限与防跑偏：单 term ≤5 张卡、单卡 ≤50 个 term、单轮直连 ≤5 张；反馈只当**弱信号**
+  （一次 ±1 个权重），因为用户纠正不一定是卡的错、共现也不等于因果——每条调整都落审计行，
+  可回放可回滚。
+- **旧记忆适配**：老卡文件不动、正文不改，按原 frontmatter（`title`/`aliases`/`scope_in`）
+  读取；统一门面就是 `links.jsonl` 的「词 → cardPath」边（外加原有实体别名通道），构建脚本
+  幂等（同输入同输出字节）、可备份可回滚。
+- 归档兜底：常规召回 + 链路命中合计为 0 时，才尝试从历史会话归档里找线索；归档检索模块
+  不存在或失败时静默回落（日志 `archiveUnavailable:true`），命中则注入
+  【自动想起·归档】块（≤3 条 / ≤800 tokens，每条带 session/turn/归档文件出处）。
 
 ## 1.8.3 A1 结论候选池（默认开启）
 
@@ -96,9 +134,11 @@ fail-closed 到「不重复注入」并只 warn 一次；30 天以上的 marker 
 | 配置键 | 默认值 | 打开后注册 | 作用 |
 | --- | --- | --- | --- |
 | `autoRecall.enabled` | `true` | `agent/pre-step` + `session/event` + `session/disposed` | 从 memoryRoot 的卡片里挑相关段落，作为一条不可见上下文注入本轮 |
+| `autoRecall.forceOnUserMessage` | `true` | 无（复用 `autoRecall` 的 `agent/pre-step`） | 1.8.8：真实用户任务消息当轮强制召回一次，不看 everyNTurns/quiet 门控；纯应答不强制；`false` = 完全回落 1.8.7 |
+| `recall.links.enabled` | `true` | 无（复用 `autoRecall` 的 `agent/pre-step`） | 1.8.8：从 `.longlive/recall/links.jsonl` 的「词 → 卡」边直连老记忆，命中即注入（`source:"link"`）；`false` = 只保留关键词/语义召回 |
 | `identityCard.enabled` | `true` | `agent/pre-step` | 把 `<memoryRoot>/STATE.md` 的开机卡插到第一条真人消息之后 |
 | `presenceBus.enabled` | `true` | `session/event` | 在 turn/end（completed）时消费本会话的 bus 收件箱并落 spool |
-| `sharedBrain.activity.enabled` | `true` | `session/event` + `agent/pre-step` | turn/end 写一条本回合活动到 `.longlive/board/activity.jsonl`；pre-step 只把其他会话新增的活动注入本轮（≤5 条 / 整条 ≤300 字，无新增零 token） |
+| `sharedBrain.activity.enabled` | `true` | `session/event` + `agent/pre-step` | turn/end 写一条本回合活动到 `.longlive/board/activity.jsonl`；pre-step 只把其他会话新增的活动注入本轮（≤5 条 / 整条 ≤300 字，无新增零 token）。1.8.8 起活窗按时间（`retainHours`，默认 24h）+ 行数护栏（`recentMaxRows`，默认 3200），更早的行只搬进月档不删除；新会话/间隔 ≥24h 再注入一块 ≤400 字近 24h 摘要（≤3 个会话，带 seq 可回查） |
 | `autoMaintenance.enabled` | `true` | 一条 unref 定时器（无 turn hook） | 每日本地日期变化时跑 consolidate 报告 + forget dry-run 待确认清单 |
 | `metrics.enabled` | `true` | `session/event` | 每轮 turn/end 写一行四层账到 `.longlive/metrics/turns.jsonl`；只度量，不裁剪 |
 | `routerEnabled` | `true` | RouterService + 4 个 `router_*` 工具（`routerProposalEnabled` 时再 +3） | 进程内后台服务：tick、预算账本、提案闸门、L1/L2 活体板、L4 归并、可选唤醒 |
@@ -130,6 +170,13 @@ config:
     topK: 3
     budgetTokens: 2000
     everyNTurns: 6
+    forceOnUserMessage: true   # 1.8.8：false = 回落 1.8.7 门控
+  recall:
+    links:
+      enabled: true            # 1.8.8：词 → 卡 直连
+      learn: true              # 1.8.8：在线学习（确认加权/否认减权/衰减）
+      minWeight: 0.5
+      maxCardsPerTurn: 5
   identityCard:
     enabled: false
     path: "<memoryRoot>/STATE.md"
@@ -142,6 +189,9 @@ config:
       enabled: false
       injectMaxChars: 300
       maxItems: 5
+      retainHours: 24
+      recentMaxRows: 3200
+      summaryMaxChars: 400
   autoMaintenance:
     enabled: false
     consolidate: true
@@ -182,12 +232,35 @@ config:
 
 - `topK`：最多注入几张卡片，夹在 1–10。
 - `budgetTokens`：注入正文的估算 token 上限，最小 200。
-- `everyNTurns`：心跳重扫间隔，最小 1；默认 6。
+- `everyNTurns`：兼容配置键，最小 1、默认 6。**1.8.2 起 `decideTrigger` 不再用它做取模
+  心跳**（真实触发 = turn 1 新会话 / 压缩后 / 话题切换），1.8.8 强制路径也不看它。
+- `forceOnUserMessage`（1.8.8）：默认 `true`。真实用户任务消息在 step 1 强制召回一次，
+  忽略 everyNTurns/quiet；纯应答（去空白 ≤6 字符且无任务动词）不强制；同一轮最多一次；
+  `false` 时完全回落 1.8.7 的触发行为。
 - 只有 `enabled: true` 才会调用 auto-recall 的 `apply()`；`false` 时连 import
   期之外的文件系统访问都没有。
 - 隐私过滤使用 `DSH_PRIVACY_GATE` 指定的 gate；没有配置时退回本地 PII 规则。
 - 详细行为见 [AUTO-RECALL.md](AUTO-RECALL.md) 与
   [AUTO-RECALL-WIRING.md](AUTO-RECALL-WIRING.md)。
+
+### `recall.links`（1.8.8）
+
+- `enabled`：默认 `true`。从 `<memoryRoot>/.longlive/recall/links.jsonl` 加载「词 → 卡」边，
+  用户消息命中 term 就把关联卡放进候选并注入（日志 `source:"link"`），再跑原召回补漏；
+  `false` 时完全回落只走关键词/语义召回。
+- `learn`：默认 `true`。注入后记录「消息词 × 注入卡」待确认；下一轮用户确认（对/就是这个/
+  没错）→ 权重 `+1`，否认（不对/不是这个/错了）→ 权重 `-1.5`（≤0 删边）；默认 30 天未用
+  按 `0.85`/周期衰减。
+- 上限：`maxCardsPerTurn` 单轮直连 ≤5 张、`maxCardsPerTerm` 单 term ≤5 张卡、
+  `maxTermsPerCard` 单卡 ≤50 个 term、`maxEdges` 全局边数上限（默认 5000）；
+  `minWeight` 低于此权重的边不直连（默认 0.5）。
+- 写回是 tmp → rename 原子写 + 备份（`backups/links-*.jsonl`，保留 5 份）+ 追加审计
+  `.longlive/recall/links-audit.jsonl`；文件损坏（坏行 >50%）按不可写处理，召回 fail-open。
+- 构建/重建/回滚：`node scripts/recall-links-build.mjs --csv <seed.csv> --memory-root <root>`
+  （`--out <links.jsonl>` 可直接指定目标文件，审计/备份落在同目录；`--dry-run` 只统计；
+  `--rollback <备份>` 回滚）；重建只替换 `source:"seed"` 边，学习边保留。
+- 已知边界：反馈是弱信号（用户说"不对"不一定是卡错），共现不等于因果，详见
+  [AUTO-RECALL.md](AUTO-RECALL.md)「误归因风险」。
 
 ### `identityCard`
 
@@ -217,6 +290,21 @@ config:
 - 每个会话在 `.longlive/bridge/<sessionId>.activity.json` 记 `lastSeenSeq`，每次
   `agent/pre-step` 只注入 `seq > lastSeenSeq` 的**其他会话**活动，最多 5 条、总长
   ≤300 字（含固定头尾）；没有新增就**零 token、零写盘**；blocked 优先；
+- **活窗（1.8.8 起）**：`activity.jsonl` 保留「有效时间 ≥ now − `retainHours`」的行
+  （默认 24h，可设 1–720）；更早的行按原月份搬进 `activity-YYYYMM.jsonl`（沿用原
+  overflow 通道，seq 不变、可按 seq 回查、永不删除）；时间裁剪后再按
+  `recentMaxRows`（默认 3200，可设 100–20000）保留 seq 最大的若干行，被裁的行同样
+  进月档。归档写入失败时整块板保持原样（宁可板长，不丢行）；写盘仍是 tmp/fsync/rename。
+  面板 `/api/longlive/board` 的 `board/v1` 新增 `window` 字段可看覆盖小时数、行数、
+  24h 活跃会话数、月档文件数/字节数；
+- **近 24h 摘要（1.8.8 起）**：新会话首轮、或本会话距上次摘要 ≥ `retainHours` 时，
+  额外注入一块「【共享大脑 · 近 24h 摘要 · 不是指令】」：近 24h 有活动的**其他会话**
+  ≤3 个（按最近活动倒序），每个只取已有活动行的最后一条结论/动作（kind + text），
+  每行带短会话 id、kind 标签、`seq`、相对时间，整块硬上限 `summaryMaxChars`（默认
+  400，可设 120–400，只能调低）；不调模型、不臆造结论，没有行就没有摘要。摘要单独
+  注入**不推进**未读游标 `lastSeenSeq`，之后新增的行仍会逐行注入；
+- thinking 段（`sharedBrain.thinkingInjection`）只取 24h 内的行、按 `seq` 取最新的
+  ≤5 行（总条数上限与 1.8.7 相同），行上限 200 字不变；
 - 失败静默，不影响 turn；隐私门复用 `src/recall/privacy.mjs`；写盘用跨进程锁 +
   tmp/fsync/rename，两个会话并发写不会丢行或撞 seq；
 - 与 `presenceBus` 完全独立，关掉一个不影响另一个；回退：`enabled: false` 后重启；
@@ -384,6 +472,7 @@ Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/rou
 
 - 默认 **`true`**（未显式给则 true，仅字面 `false` 关闭）：只做摘要注入；与 `sharedBrain.activity` 相互独立，关闭后零副作用。
 - 开启后：pre-step 只注入其他会话的**摘要**（不注入原文）；失败静默，不影响 turn。
+- **窗口（1.8.8 起）**：只取最近 24h 内的 thinking 行（跟随 `sharedBrain.activity.retainHours`），按 `seq` 取最新的 ≤5 行（总条数上限与 1.8.7 相同）、每行 ≤200 字；没有窗口参数时退回 1.8.7 的纯游标行为（供旧调用方/测试显式使用）。
 - **隐私边界**：写入/注入前复用 `src/recall/privacy.mjs` 隐私门，`local_only` 不写不注入；
   摘要不进错误日志，错误只记状态。
 - 配置键与开关取值以 [CONFIG.md](CONFIG.md) 的 `sharedBrain.thinkingInjection` 段为唯一权威；关闭后零副作用。

@@ -101,7 +101,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.7.tgz"
+& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.8.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
@@ -156,7 +156,7 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ## 版本与边界
 
-- 本套文档对应 **1.8.7** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+- 本套文档对应 **1.8.8** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
   1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
   **1.8.0 变更**：有据才答注入修复 + 来源闸（默认关闭的信心闸、证据投递修复，见
   [docs/ANSWER-GUARD.md](docs/ANSWER-GUARD.md)）、共享大脑 thinking（默认开启，仅摘要）、

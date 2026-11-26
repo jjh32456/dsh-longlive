@@ -16,6 +16,14 @@
 // no write — zero token cost. Because every event-level refresh bumps seq, the
 // cursor never gets stuck behind a long turn's first row.
 //
+// 1.8.8 M3 — 24h recap: on a new session's first step (or once the session's own
+// last recap is older than `retainHours`), inject one extra ≤400-char block
+// covering the ≤3 other sessions that were active in the window, each with its
+// newest conclusion/action row (kind + text + seq + age). The block is rendered
+// by summary.js from existing board rows only: no model call, no invented
+// conclusions, and every line points at a seq that can still be found in
+// activity.jsonl or the monthly archive. Unread line injection is unchanged.
+//
 // Failure policy: every path is wrapped; a broken board, a missing lock, a
 // privacy verdict or a host without @deepseek-ai/dsh-llm just skips this
 // feature. A turn is never blocked by the activity stream.
@@ -55,6 +63,14 @@ import {
   summarizeThinking,
 } from './thinking.js';
 import {
+  ACTIVITY_SUMMARY_MARK,
+  ACTIVITY_SUMMARY_MAX_CHARS,
+  ACTIVITY_SUMMARY_MAX_SESSIONS,
+  isSummaryDue,
+  renderActivitySummary,
+  selectActivityRecaps,
+} from './summary.js';
+import {
   ACTIVITY_SESSION_RE,
   activityBoardFile,
   createActivityStore,
@@ -71,12 +87,22 @@ export const ACTIVITY_DEFAULTS = Object.freeze({
   enabled: true,
   injectMaxChars: 300,
   maxItems: 5,
+  // 1.8.8 M3: live board window is time-based (24h) with a row-count guard.
+  retainHours: 24,
+  recentMaxRows: 3200,
+  // 1.8.8 M3: recap block budget, independent of injectMaxChars/maxItems.
+  summaryMaxChars: 400,
 });
 
 function clampInt(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(number)));
+}
+
+/** `null`/`undefined` mean "not configured" for the 1.8.8 M3 numeric keys. */
+function configured(value) {
+  return value === null || value === undefined ? undefined : value;
 }
 
 /** Pure normalizer; the config schema uses the same defaults. */
@@ -87,6 +113,11 @@ export function normalizeActivityConfig(input = {}) {
     enabled: raw.enabled !== false,
     injectMaxChars: clampInt(raw.injectMaxChars, ACTIVITY_DEFAULTS.injectMaxChars, 60, 2000),
     maxItems: clampInt(raw.maxItems, ACTIVITY_DEFAULTS.maxItems, 1, 10),
+    // M3 defaults keep 1.6.8 behaviour for callers that pass nothing: 24h window,
+    // 3200-row guard (1.6.8's 500 was a row cap, not a time window).
+    retainHours: clampInt(configured(raw.retainHours), ACTIVITY_DEFAULTS.retainHours, 1, 720),
+    recentMaxRows: clampInt(configured(raw.recentMaxRows), ACTIVITY_DEFAULTS.recentMaxRows, 100, 20000),
+    summaryMaxChars: clampInt(configured(raw.summaryMaxChars), ACTIVITY_DEFAULTS.summaryMaxChars, 120, ACTIVITY_SUMMARY_MAX_CHARS),
     createUserMessage: typeof raw.createUserMessage === 'function' ? raw.createUserMessage : undefined,
   };
 }
@@ -103,6 +134,10 @@ export function emptyActivityState(sessionId) {
     lastInjectedSeq: 0,
     lastInjectedAt: null,
     injectedTurns: 0,
+    // 1.8.8 M3: when this session last received a 24h recap (null = never).
+    // Missing on old state files → treated as never, which is the desired
+    // migration behaviour (one recap on the next turn, then once per window).
+    lastSummaryAt: null,
     resets: 0,
     lastResetAt: null,
     updatedAt: null,
@@ -122,6 +157,7 @@ export function readActivityState(memoryRoot, sessionId) {
     lastInjectedSeq: Number.isInteger(value.lastInjectedSeq) && value.lastInjectedSeq >= 0 ? value.lastInjectedSeq : 0,
     injectedTurns: Number.isInteger(value.injectedTurns) && value.injectedTurns >= 0 ? value.injectedTurns : 0,
     resets: Number.isInteger(value.resets) && value.resets >= 0 ? value.resets : 0,
+    lastSummaryAt: typeof value.lastSummaryAt === 'string' && value.lastSummaryAt !== '' ? value.lastSummaryAt : null,
   };
 }
 
@@ -251,12 +287,23 @@ export function createActivityStream(options = {}) {
     errors: 0,
     thinkingWritten: 0,
     thinkingInjected: 0,
+    // 1.8.8 M3: how many recap lines were injected / how many turns carried a recap.
+    summaryInjected: 0,
+    summaryTurns: 0,
   };
   const sessions = new Map();
   // `${sessionId}|${key}` → { at: ms, kind } — 同 key 节流 ≤1 次刷新/10s.
   const refreshes = new Map();
   const disposers = [];
-  const store = memoryRoot ? createActivityStore({ memoryRoot, now, privacyScan }) : null;
+  const store = memoryRoot
+    ? createActivityStore({
+      memoryRoot,
+      now,
+      privacyScan,
+      retainHours: cfg.retainHours,
+      recentMaxRows: cfg.recentMaxRows,
+    })
+    : null;
   const enabled = cfg.enabled === true && store !== null;
 
   function stateFor(sessionId) {
@@ -533,7 +580,9 @@ export function createActivityStream(options = {}) {
     if (!messages.some((message) => isHumanMessage(message))) return skip('empty-turn');
     if (messages.some((message) => {
       const text = textOfMessage(message);
-      return text.includes(ACTIVITY_HINT_MARK) || text.includes(THINKING_HINT_MARK);
+      return text.includes(ACTIVITY_HINT_MARK)
+        || text.includes(THINKING_HINT_MARK)
+        || text.includes(ACTIVITY_SUMMARY_MARK);
     })) {
       return { injected: false, skipped: 'turn-already-injected' };
     }
@@ -541,6 +590,7 @@ export function createActivityStream(options = {}) {
     const read = store.read();
     if (!read.ok) return skip('board-unreadable');
     const state = readActivityState(memoryRoot, sessionId);
+    const nowMs = now().getTime();
     const boardMax = maxSeqOf(read.entries);
     // Board reset (deleted/emptied/replaced-from-backup): the persisted seq-only
     // cursor can sit above every current row, so `seq > lastSeenSeq` would match
@@ -562,9 +612,24 @@ export function createActivityStream(options = {}) {
         selfSessionId: sessionId,
         lastSeenSeq: effectiveSeen,
         maxItems: 5,
+        nowMs,
+        windowHours: cfg.retainHours,
       })
       : [];
-    if (fresh.length === 0 && freshThinking.length === 0) {
+    // 1.8.8 M3: the recap is due on a new session's first step or once the
+    // session's own last recap is older than retainHours. It is built only from
+    // existing board rows (never from the model), so an empty board simply
+    // means no recap — never an invented one.
+    const summaryDue = isSummaryDue(state, { nowMs, intervalHours: cfg.retainHours });
+    const freshRecaps = summaryDue
+      ? selectActivityRecaps(read.entries, {
+        nowMs,
+        windowHours: cfg.retainHours,
+        selfSessionId: sessionId,
+        maxSessions: ACTIVITY_SUMMARY_MAX_SESSIONS,
+      })
+      : [];
+    if (fresh.length === 0 && freshThinking.length === 0 && freshRecaps.length === 0) {
       return { injected: false, skipped: 'no-new', reset: resetCursor };
     }
 
@@ -601,16 +666,43 @@ export function createActivityStream(options = {}) {
       }
       allowedThinking.push({ ...item, text: summary });
     }
-    if (allowed.length === 0 && allowedThinking.length === 0) {
+    const allowedRecaps = [];
+    for (const item of freshRecaps) {
+      try {
+        const verdict = privacyScan(item.text);
+        if (!verdict || verdict.verdict === 'local_only') {
+          stats.privacy += 1;
+          continue;
+        }
+      } catch {
+        stats.privacy += 1;
+        continue;
+      }
+      allowedRecaps.push(item);
+    }
+    if (allowed.length === 0 && allowedThinking.length === 0 && allowedRecaps.length === 0) {
       return { injected: false, skipped: 'privacy' };
     }
 
     const parts = [];
+    let summarySeqs = [];
+    // 1.8.8 M3: recap first — it is the 「其他会话现在在哪」 map; unread lines and
+    // thinking follow, so a new session reads context before details.
+    if (allowedRecaps.length > 0) {
+      const renderedSummary = renderActivitySummary(allowedRecaps, {
+        maxChars: cfg.summaryMaxChars,
+        nowMs,
+      });
+      if (renderedSummary.text !== '') {
+        parts.push(renderedSummary.text);
+        summarySeqs = renderedSummary.seqs;
+      }
+    }
     if (allowed.length > 0) {
       const rendered = renderActivityHint(allowed, {
         maxChars: cfg.injectMaxChars,
         maxItems: cfg.maxItems,
-        nowMs: now().getTime(),
+        nowMs,
       });
       if (rendered.text !== '') parts.push(rendered.text);
     }
@@ -642,15 +734,20 @@ export function createActivityStream(options = {}) {
     }
 
     const injectedItems = [...allowed, ...allowedThinking];
+    const unreadInjected = injectedItems.length > 0;
+    const nowIso = new Date(nowMs).toISOString();
     const nextState = {
       ...state,
-      lastSeenSeq: Math.max(effectiveSeen, maxSeqOf(read.entries)),
-      lastInjectedSeq: maxSeqOf(injectedItems),
-      lastInjectedAt: now().toISOString(),
+      // A summary-only injection must NOT advance the unread cursor: those rows
+      // were never shown as lines, so the next turn still needs to deliver them.
+      lastSeenSeq: unreadInjected ? Math.max(effectiveSeen, boardMax) : state.lastSeenSeq,
+      lastInjectedSeq: unreadInjected ? maxSeqOf(injectedItems) : state.lastInjectedSeq,
+      lastInjectedAt: nowIso,
+      lastSummaryAt: allowedRecaps.length > 0 ? nowIso : state.lastSummaryAt,
       injectedTurns: state.injectedTurns + 1,
       resets: state.resets + (resetCursor ? 1 : 0),
-      lastResetAt: resetCursor ? now().toISOString() : state.lastResetAt,
-      updatedAt: now().toISOString(),
+      lastResetAt: resetCursor ? nowIso : state.lastResetAt,
+      updatedAt: nowIso,
     };
     try {
       writeJsonAtomic(activityStateFile(memoryRoot, sessionId), nextState);
@@ -659,6 +756,8 @@ export function createActivityStream(options = {}) {
     }
     stats.injected += 1;
     stats.thinkingInjected += allowedThinking.length;
+    stats.summaryInjected += allowedRecaps.length;
+    if (allowedRecaps.length > 0) stats.summaryTurns += 1;
     return {
       injected: true,
       sessionId,
@@ -666,6 +765,9 @@ export function createActivityStream(options = {}) {
       reset: resetCursor,
       items: injectedItems.map((item) => ({ seq: item.seq, sessionId: item.sessionId, kind: item.kind })),
       thinkingItems: allowedThinking.length,
+      summary: allowedRecaps.length > 0,
+      summaryItems: allowedRecaps.length,
+      summarySeqs,
       text,
     };
   }
@@ -740,6 +842,9 @@ export function registerActivityStream(ctx, cfg = {}, options = {}) {
     memoryRoot: options.memoryRoot,
     injectMaxChars: cfg.injectMaxChars,
     maxItems: cfg.maxItems,
+    retainHours: cfg.retainHours,
+    recentMaxRows: cfg.recentMaxRows,
+    summaryMaxChars: cfg.summaryMaxChars,
     thinkingInjection: cfg.thinkingInjection === true,
     createUserMessage: cfg.createUserMessage,
     now: options.now,
@@ -760,3 +865,9 @@ export function registerActivityStream(ctx, cfg = {}, options = {}) {
 
 export { ACTIVITY_HINT_MARK, ACTIVITY_REFRESH_THROTTLE_MS, shortSessionId, activityBoardFile };
 export { THINKING_HINT_MARK, THINKING_KIND, THINKING_LINE_MAX, THINKING_MAX_ITEMS } from './thinking.js';
+export {
+  ACTIVITY_SUMMARY_END,
+  ACTIVITY_SUMMARY_MARK,
+  ACTIVITY_SUMMARY_MAX_CHARS,
+  ACTIVITY_SUMMARY_MAX_SESSIONS,
+} from './summary.js';

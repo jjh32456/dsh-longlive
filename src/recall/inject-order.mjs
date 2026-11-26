@@ -78,6 +78,14 @@ export const IDENTITY_SECTION = 'identity-router.open-card';
 /** 正文首行标记：保留用于识别历史消息与外部注入。 */
 export const AUTO_TEXT_MARK = '【自动想起】';
 export const IDENTITY_TEXT_MARK = '【开机卡】';
+/**
+ * 1.8.8 M2：归档兜底块的标记。它是 auto-recall 的第三种正文形态
+ * （常规召回/链路命中之外的归档兜底），必须与 AUTO_TEXT_MARK 一样被
+ * isAutoMessage / injectedTexts / mergeInjectionOrder 识别，否则：
+ *   ① 旧归档块不会被 mergeInjectionOrder 幂等替换；
+ *   ② 归档块会被 isRealUserMessage 当真人消息，污染 firstUserText。
+ */
+export const ARCHIVE_TEXT_MARK = '【自动想起·归档】';
 
 /** 只在文本里认这两类路径；其它目录不参与（防止把任意 .md 当卡）。 */
 const CARD_PATH_RE = /(?:^|[\s"'`（()【\[,，;；/])((?:topics|handover)\/[^\s"'`）)】\]，,;；]+\.md)/g;
@@ -147,7 +155,7 @@ export function isAutoMessage(message) {
     if (!Array.isArray(sections) || sections.length === 0) return true;
     return sections.some((s) => s?.name === AUTO_SECTION);
   }
-  return startsWithMark(message, AUTO_TEXT_MARK);
+  return startsWithMark(message, AUTO_TEXT_MARK) || startsWithMark(message, ARCHIVE_TEXT_MARK);
 }
 
 /**

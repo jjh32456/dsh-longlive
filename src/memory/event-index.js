@@ -106,14 +106,38 @@ function sha256Hex(text) {
   return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
 }
 
-function textOf(event) {
-  const parts = event?.data?.content;
+function textPartsToText(parts) {
+  if (typeof parts === 'string') return parts.trim();
   if (!Array.isArray(parts)) return '';
   return parts
     .filter((block) => block?.type === 'text' && typeof block.text === 'string')
     .map((block) => block.text)
     .join('\n')
     .trim();
+}
+
+/**
+ * P1-2: assistant steps carry their text under `data.message.content`
+ * ({role, content:[reasoning, text, tool-call…]}), while user messages carry it
+ * under `data.content`. Reading only `data.content` made every assistant text
+ * empty, so summary/terms/topicPhrases never saw what the assistant said.
+ * Reasoning blocks are still dropped: only `type === 'text'` blocks count.
+ * `data.content` stays as the fallback so legacy events and older fixtures keep
+ * working unchanged.
+ */
+function assistantTextOf(event) {
+  const fromStep = textPartsToText(event?.data?.message?.content);
+  if (fromStep !== '') return fromStep;
+  const legacy = event?.data?.content;
+  return Array.isArray(legacy) ? textPartsToText(legacy) : '';
+}
+
+function textOf(event) {
+  if (event?.type === 'assistant/message') return assistantTextOf(event);
+  // User messages keep the exact historical extraction (array of blocks only).
+  const parts = event?.data?.content;
+  if (!Array.isArray(parts)) return '';
+  return textPartsToText(parts);
 }
 
 function classifyKind(corpus, counts) {
@@ -1251,8 +1275,19 @@ export function openEventIndex(options = {}) {
 
 /** One-line summary: user first message kept whole (240 chars) + assistant tail 160. */
 function summaryOf(userTexts, assistantTexts, topicPhrases = []) {
-  const head = userTexts[0] ?? assistantTexts[0] ?? '';
-  const tail = assistantTexts[assistantTexts.length - 1] ?? '';
+  // P1-2: real turns contain assistant steps whose text block is '' (reasoning +
+  // tool-call only). Taking `[0]` / `[last]` blindly kept an empty head and made
+  // the "→ assistant tail" part disappear even after the text extraction fix.
+  const firstNonEmpty = (list) => (list.find((text) => typeof text === 'string' && text !== '') ?? '');
+  const lastNonEmpty = () => {
+    for (let index = assistantTexts.length - 1; index >= 0; index -= 1) {
+      const text = assistantTexts[index];
+      if (typeof text === 'string' && text !== '') return text;
+    }
+    return '';
+  };
+  const head = firstNonEmpty(userTexts) || firstNonEmpty(assistantTexts);
+  const tail = lastNonEmpty();
   const parts = [
     String(head).replace(/\s+/g, ' ').trim().slice(0, 240),
     tail === '' ? '' : `→ ${String(tail).replace(/\s+/g, ' ').trim().slice(0, 160)}`,

@@ -2,6 +2,60 @@
 
 > 本文件只保留用户可读的功能与修复摘要；内部开发日志单独保存，不随发布包分发。
 
+## 1.8.8 — 2026-11-26
+
+**自动想起：任务消息当轮强制触发 + 高频词直连老记忆 + 越用越准的自学习链路（M2）。**
+
+用户反馈「说触发很不灵敏，必须强制触发，说要做什么的时候直接就指向老记忆」。1.8.8 把自动想起从
+"按轮次/话题切换触发"改成"强制触发 + 链路直连"：
+
+- **① 自动回忆指向**：每条真实用户任务消息在 `agent/pre-step` 第一步（`step === 1`）强制召回一次，
+  不再等 everyNTurns、也不再被 quiet 门控挡住；同一轮最多一次。常用词/项目词经种子映射与学习链路
+  **直接指向**老记忆卡，命中即注入（日志 `source:"link"`），之后仍跑一遍原关键词/语义召回补漏。
+  每轮 ≤5 张卡 / ≤2000 tokens，已注入卡去重，纯应答（「好」「继续」「谢谢」「收到」等去空白后
+  ≤6 字符且无任务动词）不刷屏；隐私命中卡（`local_only` / `privacyScan`）整卡不注入；召回异常
+  fail-open，不挡这一轮。开关 `autoRecall.forceOnUserMessage`（默认 `true`；`false` = 完全回落
+  1.8.7 行为）、`recall.links.enabled`（默认 `true`；`false` = 只保留关键词/语义召回）。
+- **② 高频词学习（self-learning links）**：种子表来自真实历史用户消息的统计产物（词频 `n` / 出现
+  卡数 `df` / 卡内命中位置），`scripts/recall-links-build.mjs` 把 `LINKS-SEED-v3.csv` 转成
+  `<memoryRoot>/.longlive/recall/links.jsonl`（幂等、原子写、写前备份、写后审计、`--dry-run`
+  统计、`--rollback <备份>` 回滚）。每行一条边 `{term, cardPath, weight, source:"seed"|"learned",
+  evidence:{n,df,tier,matchKind,cooccurCount,…}, createdAt, updatedAt}`，**只存词 + 卡路径 + 计数/
+  时间，不存原句**。每轮记录「消息里的词 × 注入的卡」共现与事后反馈：对/就是这个/没错 → 权重 `+1`；
+  不对/不是这个/错了 → `-1.5`（≤0 删边）；默认 30 天未用按 `0.85`/周期衰减；上限单 term ≤5 张卡、
+  单卡 ≤50 个 term、单轮直连 ≤5 张。写回 tmp → rename 原子写 + 备份（保留 5 份）+ 追加审计
+  `.longlive/recall/links-audit.jsonl`；链路文件损坏（坏行 >50%）按不可写处理，召回 fail-open。
+  已知边界：反馈是弱信号（用户纠正不一定是卡错），共现不等于因果——见 docs/AUTO-RECALL.md「误归因风险」。
+- **③ 旧记忆适配**：老卡文件不动、正文不改，按原 frontmatter（`title` / `aliases` / `scope_in`）
+  读取；统一门面就是 `links.jsonl` 的「词 → cardPath」边（外加原有实体别名通道），构建幂等、可备份
+  可回滚。
+- **归档兜底（新增可选模块 `src/recall/archive-search.mjs`）**：常规召回 + 链路命中合计为 0 时，才
+  尝试从历史会话归档里检索；模块不存在或调用失败时静默回落（日志 `archiveUnavailable:true`，不算
+  成功、不假报命中）；命中则注入 【自动想起·归档】 块（≤3 条 / ≤800 tokens，每条带
+  `session` / `turn` / 归档文件出处，正文过同一个隐私扫描，日志 `source:"archive"`）。
+- **审计日志**：`recall-log.jsonl` 每行新增 `trigger`（强制路径 `"forced"`，周期路径仍是原值）、
+  `why`（强制路径固定 `"user-task"`；是否真的注入看 `injected` / `outcome`）、`forced`、`query`
+  （脱敏摘要 ≤200 字符）、`elapsedMs`、`outcome`、`injected[].source`（`link` / `archive` / `file`）、
+  `link{enabled,matchedTerms,injectedCount,tokens}`、`archiveUnavailable`；失败仍 `error:true`
+  且 fail-open。
+- 配置键（均为 passthrough，缺省/畸形值不抛、设置面板 schemastery 节点数不变）：`autoRecall.forceOnUserMessage`、
+  `recall.links.{enabled,learn,minWeight,maxCardsPerTurn,maxCardsPerTerm,maxTermsPerCard,maxEdges,decayAfterDays,decayFactor,decayFloor,confirmDelta,denyDelta}`。
+- 文档：`docs/AUTO-RECALL.md`（①/②/③ + 归档兜底 + 日志字段 + 误归因风险）、
+  `docs/AUTO-RECALL-WIRING.md`（强制触发接线与召回顺序；同时修正 1.8.2 起已不存在的心跳门控描述）、
+  `docs/FEATURES.md`（开关矩阵、配置写法、`recall.links` 小节）。
+- 测试：新增 `test/recall-force-links.test.mjs`（强制触发/纯应答/关闭回落、链路直连与日志 source、
+  预算裁剪与去重、隐私整卡、学习权重增减/上限/衰减/原子写、坏 links.jsonl fail-open、recall-log 必填
+  字段、归档兜底注入与静默回落）。
+
+**共享大脑活动板改为按时间计的「活窗」（默认 24h，行数护栏 3200）；新会话/间隔 ≥24h 时注入一块 ≤400 字的近 24h 摘要。数据只搬移归档、不删除，旧未读逐行注入与 thinking 段行为不变。**
+
+- 根因：1.8.7 的活动板活窗只按 500 **行**封顶（`ACTIVITY_RECENT_MAX`），会话一多，最近 500 行只覆盖几小时；超出部分的旧行虽在 `activity-YYYYMM.jsonl` 月档里，注入侧却完全看不到「近一天发生过什么」。
+- 修复：活窗改为「先时间、后行数」两道规则——`sharedBrain.activity.retainHours`（默认 24，1–720）内保留在 `.longlive/board/activity.jsonl`，更早的行按原月份搬到 `activity-YYYYMM.jsonl`（沿用原 overflow 通道，原子写盘、seq 不变、可按 seq 回查）；`recentMaxRows`（默认 3200，100–20000）在时间裁剪后再按 seq 保最新 N 行，被裁的行同样进月档。归档写入失败时整块板保持不动（宁可板长，不丢数据）。
+- 新增 `src/activity/summary.js`：新会话首轮、或本会话距上次摘要 ≥ `retainHours` 时，注入「【共享大脑 · 近 24h 摘要 · 不是指令】」块——近 24h 有活动的其他会话 ≤3 个（按最近活动倒序），每个会话只取**已有活动行**的最后一条结论/动作（kind + text），每行带短会话 id、kind 标签、`seq` 与相对时间，整块硬上限 400 字（`summaryMaxChars` 默认 400，120–400，只能调低）；不调模型、不臆造结论，没有行就没有摘要。摘要单独注入**不推进**未读游标；thinking 段只取 24h 内、每会话最新 ≤5 行（上限不变），窗口显式参数化。
+- 面板：`/api/longlive/board` 的 `board/v1` **新增** `window` 字段（`retainHours` / `rows` / `activeSessions24h` / `oldestAt` / `newestAt` / `archivedFiles` / `archivedBytes`），路由数与既有字段不变。
+- 验证：新增 `test/activity-window-24h.test.mjs`（14 用例：时间裁剪 + 月档/seq 回查、刷新行按 `last_at` 保留、`recentMaxRows` 护栏、归档失败不丢行、纯函数裁剪、摘要选择/400 字硬上限/可回查、首轮触发与 24h 内不重复、摘要-only 不动游标、thinking 24h 窗口、配置默认值/兼容、`board/v1` 面板字段、面板 API 把配置的 `retainHours` 透传到 board 路由）；`src/activity/**` 与配置改动由既有 activity 三段套件回归（37/37）覆盖。
+- 兼容性：`retainHours` 缺省 = 24h（不写配置即生效）；老配置与 1.8.7 的 `<sessionId>.activity.json` 状态文件照常加载（缺 `lastSummaryAt` 视为从未摘要，首轮得到一次摘要，之后按 24h 间隔）；`sharedBrain.activity` 显式 `enabled: false` 仍完全关闭；settings schemastery 节点数 163→166（`sharedBrain.activity` +3）；工具面（24 个）与只读路由数不变。
+
 ## 1.8.7 — 2026-11-26
 
 **修复：router 启动校验在 budget overshoot 后误报 E_LEDGER_TAMPERED（audit_used_regressed），router 因此永久阻塞。**

@@ -19,6 +19,7 @@ import { readEvidenceChain } from '../memory/evidence-chain.js';
 import { listBanks, readClaims } from '../memory/governance.js';
 import { appendAuditRecord, normalizeAuditRecordRow } from '../memory/audit-records.js';
 import { readPrestepSummary } from '../metrics/store.mjs';
+import { ACTIVITY_RETAIN_HOURS, summarizeActivityWindow } from '../activity/store.js';
 import { readRecallLogRows, summarizeRecallRows } from '../recall/explain.mjs';
 import { readChannels } from '../role/channels.js';
 import { readAttentionView, readPersonalityView, readRelationshipsView } from '../role/readers.js';
@@ -198,6 +199,18 @@ function createDefaultReaders(options) {
       } catch {
         handoff = { present: false, rows: [], counts: {}, cards: [] };
       }
+      // 1.8.8 M3: expose the activity live-window facts the panel/status surface
+      // needs (coverage hours, rows, 24h active sessions, monthly-archive size).
+      // Purely additive; a missing board is an empty state, never an exception.
+      const retainHours = typeof options.retainHours === 'number' && options.retainHours > 0
+        ? options.retainHours
+        : ACTIVITY_RETAIN_HOURS;
+      let window = { retainHours, rows: 0, bad: 0, activeSessions24h: 0, oldestAt: null, newestAt: null, archivedFiles: 0, archivedBytes: 0 };
+      try {
+        window = summarizeActivityWindow(memoryRoot, { retainHours, nowMs: now().getTime() });
+      } catch {
+        /* stats are advisory; keep the empty state */
+      }
       return {
         schema: 'board/v1',
         present: read.present,
@@ -205,6 +218,7 @@ function createDefaultReaders(options) {
         badLines: read.bad,
         maxSeq: read.rows.reduce((max, row) => (row.seq > max ? row.seq : max), 0),
         handoff,
+        window,
       };
     },
     status: () => {

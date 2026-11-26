@@ -18,6 +18,81 @@ config:
 默认值：`enabled: true`（1.8.0 起）、`topK: 3`、`budgetTokens: 2000`、`everyNTurns: 6`。
 显式 `enabled: false` 时零注入，行为与无此能力时一致。
 
+## 1.8.8：强制触发 + 链路直连 + 自学习（M2）
+
+一句话：**你一发任务消息，当轮就先想起一次**；你常用的词/项目词通过链路**直接指向**相关老卡；
+你说「对/就是这个」它会记下来，说「不对/不是这个」它会减权，久不用会衰减。
+
+### ① 自动回忆指向（forced recall + link）
+
+- 每条真实用户任务消息，在 `agent/pre-step` 的 `step === 1` 就强制召回一次，
+  **不再等 everyNTurns、也不再被 quiet 门控挡住**；同一轮最多一次。
+- 纯应答不刷屏：消息去掉空白/标点后 ≤6 字符且没有任务动词（如「好」「嗯」「ok」「继续」
+  「谢谢」「收到」）→ 不强制召回，走原来的按轮次/话题切换路径。
+- 链路直连：`<memoryRoot>/.longlive/recall/links.jsonl` 里的「词 → 卡」边，按 `weight`
+  从高到低命中用户消息里的词（中文按子串、拉丁词按词边界）；**命中即注入**，日志记
+  `source:"link"`；之后仍跑一遍原来的 `chooseRecall` 补漏，同一张卡只注入一次。
+- 每轮注入上限：≤5 张卡 / ≤2000 tokens（沿用 `chooseRecall` 的预算裁剪与 `minScore`）；
+  已注入过的卡（`collectInjectedTexts`）去重；隐私命中卡（`local_only` / `privacyScan`）
+  **整卡不注入**；召回异常 fail-open，不挡这一轮。
+- 关掉强制触发：`autoRecall.forceOnUserMessage: false`（默认 `true`）→ 完全回落 1.8.7
+  行为；关掉链路：`recall.links.enabled: false`（默认 `true`）→ 只保留关键词/语义召回。
+
+```yaml
+config:
+  autoRecall:
+    enabled: true
+    topK: 5                 # 1.8.8 强制路径实际还会被夹到 ≤5
+    budgetTokens: 2000
+    forceOnUserMessage: true # 1.8.8 新增；false = 回落 1.8.7
+  recall:
+    links:
+      enabled: true          # 1.8.8 新增；false = 回落 1.8.7
+      learn: true            # 在线学习（确认加权 / 否认减权 / 衰减）
+```
+
+### ② 高频词学习（self-learning links）
+
+- 种子表来自**真实历史用户消息**的统计产物（词频 `n` / 出现卡数 `df` / 命中的卡内位置），
+  用离线脚本把 `LINKS-SEED-v3.csv` 转成 `links.jsonl`：**词表是数据产物，不是代码常量**。
+  构建命令（幂等、原子写、写前备份、写后审计，`--dry-run` 只统计）：
+  `node scripts/recall-links-build.mjs --csv <seed.csv> --memory-root <记忆根>`；
+  用 `--out <links.jsonl>` 可直接指定目标文件（审计与备份落在同目录），
+  `--rollback <备份>` 回滚。
+- 每行一条边，形状：
+  `{term, cardPath, weight, source:"seed"|"learned", evidence:{n,df,tier,matchKind,cooccurCount,…}, createdAt, updatedAt}`；
+  **只存词与卡路径和计数/时间，不存原句**。
+- 学习信号：本轮注入后，把「本轮用户消息里的词 × 本轮注入的卡」记成待确认；
+  下一轮用户说「对/就是这个/没错」→ 相关边 `weight += 1`；说「不对/不是这个/错了」→
+  `weight -= 1.5`（≤0 删边）；`N` 天（默认 30）未用按 `0.85`/周期衰减。
+- 上限：单 term ≤5 张卡、单卡 ≤50 个 term、单轮直连 ≤5 张；溢出按 weight 淘汰。
+- 写回是 **tmp → rename 原子写 + 备份 + 追加审计行**（`.longlive/recall/links-audit.jsonl`），
+  可导出、可回滚（`--rollback <备份>`）、可从种子表重建（重建只替换 `source:"seed"` 边，
+  学习出来的 `source:"learned"` 边保留）。
+- **误归因风险（已知边界）**：用户说「不对/不是这个」不一定代表这张卡错了——可能是话题
+  没对上、上下文没跟上、或纠正的是别的段落。因此本实现把反馈当作**弱信号**：一次反馈只
+  调整 ±1 个权重（默认值），不做批量改写，不删除学习边以外的任何东西；每条调整都落审计行，
+  可以回放与回滚。共现同样不等于因果（注入卡恰好同轮出现就被计数），所以边权只作为排序
+  依据，不作为"这张卡一定相关"的断言。
+
+### ③ 旧记忆适配（老卡不动，只补门面）
+
+- 老卡文件不动、正文不改：`topics/`、`procedures/`、`journal/`、`handover/` 里的 Markdown
+  卡按原 frontmatter（`title` / `aliases` / `scope_in`）读取，不迁移、不改写。
+- 统一门面 = `links.jsonl` 的「词 → cardPath」边（外加原有 `entities.mjs` 实体别名通道），
+  让新召回认识老卡；`links.jsonl` 由上面的构建脚本**幂等**生成（同输入同输出字节），
+  支持备份/回滚，所以这一步是可逆的。
+- 运行期若发现链路文件损坏（坏行 >50%），按"不可写"处理：不学习、不写回，召回照常
+  fail-open，坏文件保留现场给审计。
+
+### 归档兜底（1.8.8，可选模块）
+
+常规召回 + 链路命中合计为 0 时，才尝试从**历史会话归档**里找线索（被截断/归档切掉的轮次）。
+归档检索由 `src/recall/archive-search.mjs` 提供（`searchArchive({memoryRoot, queryText, limit})`）；
+模块不存在或调用失败时**静默回落**，日志记 `archiveUnavailable:true`（不算成功、不假报命中）。
+命中时注入 `【自动想起·归档】` 块：≤3 条、≤800 tokens，每条带 `session` / `turn` / 归档文件出处，
+正文过同一个隐私扫描。
+
 ## 语义召回（embedding，1.8.0 起默认开启；模型缺失静默退关键词）
 
 在关键词之外，可以再挂一个**本地**向量召回（1.8.0 起默认开；模型缺失时静默走关键词）。它和 `autoRecall` 是两个独立的开关：
@@ -56,7 +131,28 @@ config:
  "blocked":[{"id":"topics/y.md","title":"…","reason":"max-items"}]}
 ```
 
-`reason` 取 `keyword+vector` / `vector` / `keyword`；`blocked` 的 `reason` 取
+1.8.8 起每行固定带强制召回的取证字段（周期路径仍在，字段为缺省值）：
+
+```json
+{"turn":12,"why":"user-task","trigger":"forced","forced":true,
+ "query":"接着做 v39 战役","elapsedMs":37,"outcome":"injected",
+ "injectedCount":2,
+ "injected":[{"id":"topics/v39.md","title":"…","score":0.83,"reason":"link","source":"link"}],
+ "link":{"enabled":true,"matchedTerms":["v39","战役"],"injectedCount":2,"tokens":145},
+ "archiveUnavailable":false,
+ "gate":{"recall":true,"why":"forced","everyNTurns":6}}
+```
+
+- `trigger`：`forced`（强制路径）/ `turn<=1` / `topic-switch` / `quiet` …（周期路径原值）；
+- `why`：强制路径固定 `user-task`（"这一轮被强制触发过"），是否真的注入了看
+  `injected` / `outcome`（`injected` / `zero-hit` / `gate-skip` / `error` /
+  `factory-unavailable`），不要只看 `why`；
+- `injected[].source`：`link`（链路直连）/ `archive`（归档兜底）/ `file`（原关键词/语义召回）；
+- `query` 是脱敏后的用户消息摘要（≤200 字符，手机号/邮箱/身份证/IP/超长 token 打码）；
+- 失败时 `error:true`，进程内 catch 后照常返回本轮 decision（fail-open）。
+
+`reason` 取 `keyword+vector` / `vector` / `keyword` / `link`（1.8.8 链路直连）/
+`archive`（1.8.8 归档兜底）；`blocked` 的 `reason` 取
 `privacy` / `dedupe` / `budget` / `max-items` / `seen`（够格但没进本轮注入的卡）。
 
 ## 数据来源
@@ -75,13 +171,23 @@ config:
 
 ## 什么时候想、什么时候安静
 
+1.8.7 及以前（`forceOnUserMessage:false` 时仍是这一套）：
+
 - 只在 `payload.step === 1` 触发；同一轮后续 step 不重复注入。
-- turn 1 必然检索一次。
-- 之后默认受 `everyNTurns` 节流：`turn % everyNTurns === 0` 时做一次心跳重扫。
-  默认 6 时，**turn 2–5 若话题没换就保持安静**，turn 6 再扫；往后 12、18……
-- 话题明显切换（当前消息与上次查询的 bigram containment 低于 0.25）会提前触发，
-  不必等心跳。
-- 与上次查询完全相同则跳过。
+- turn 1 必然检索一次（`gate.why = "new-session"`）。
+- 压缩之后触发一次（`after-compaction`）。
+- 话题明显切换（当前消息与上次查询的 bigram containment 低于 0.25）→ 触发
+  （`topic-switch`）；与上次查询完全相同 → 跳过（`same-as-last`）。
+- 其余情况安静（`quiet`），日志 `gate.recall:false`。
+  历史口径（1.8.0/1.8.1 文档）：每 `everyNTurns`（默认 6）才心跳重扫一次，turn 2–5 若话题没换就保持安静、turn 6 再扫；
+  注意：1.8.2 起 `everyNTurns` 不再参与门控判断（`decideTrigger` 里没有取模逻辑），
+  它仍是兼容配置键；真实的触发是"新会话 / 压缩后 / 话题切换"三种。
+
+1.8.8 起（默认 `forceOnUserMessage:true`）：
+
+- 每条真实用户任务消息都强制召回一次（`gate.why = "forced"`），不看上面那套门控；
+- 纯应答（≤6 字符且无任务动词）→ 不强制，回落上面那套；
+- 强制/周期触发都会先跑链路直连，再跑 `chooseRecall` 补漏。
 
 ## 注入放在哪、为什么看不见
 
@@ -123,6 +229,8 @@ id 的字典序。
 - 仓库测试（npm 包不含）：`test/auto-recall.test.mjs`
 - 仓库测试（npm 包不含）：`test/embedding-recall.test.mjs`（tokenizer / 增量缓存 / 融合 / recall-log）
 - 仓库测试（npm 包不含）：`test/integration-pre-step.test.mjs`
+- 仓库测试（npm 包不含）：`test/recall-force-links.test.mjs`（1.8.8：强制触发 / 链路直连 /
+  在线学习 / 预算去重 / 隐私 / 坏文件 fail-open / 归档兜底 / recall-log 字段）
 - `test/v4-hardening.test.mjs`
 - `test/feature-flags.test.mjs`（默认值与单开关隔离）
 

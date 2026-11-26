@@ -8,7 +8,7 @@
  *   - 行为零改动：不改变触发规则（turn<=1 / same-as-last / quiet），
  *     只给已有决策补原因。
  *
- * why 语义（6 类，固定枚举）：
+ * why 语义（7 类，固定枚举）：
  *   - everyNTurns  历史 1.8.1 及以前的 every-n-turns 行；1.8.2 起 decideTrigger
  *                  不再产生该触发（此处只兼容读旧 recall-log，不是现行触发路径）
  *   - injected     本轮确实注入了卡片（非心跳轮）
@@ -16,9 +16,14 @@
  *   - everyNTurns  本轮由 everyNTurns 心跳触发（不论最终是否有注入；用 injected 数组区分结果）
  *   - quiet        触发规则判定本轮「安静」（gate.why === 'quiet'）
  *   - policy-skip  gate 因其它策略跳过（same-as-last / empty-query 等）
+ *   - user-task    1.8.8 M2：强制触发（autoRecall.forceOnUserMessage）路径。
+ *                  它与静默/周期路径正交：只要本轮是「真人任务消息 → 强制召回」，
+ *                  why 固定为 user-task、trigger 固定为 forced，不看最终是否注入
+ *                  （是否真注入看 injected 数组与 outcome 字段，禁止用 why 冒充成功）。
  *   - error        本轮召回失败（异常 / 注入工厂不可用）
  *
  * trigger 是 gate.why 的稳定口径（turn<=1 等），与 why 正交，便于对照触发规则。
+ * 1.8.8 起 trigger 多了 'forced'（强制触发），旧值一个不动。
  */
 
 import fs from 'node:fs';
@@ -42,6 +47,8 @@ export const RECALL_WHY_VALUES = Object.freeze([
   'quiet',
   'policy-skip',
   'error',
+  // 1.8.8 M2：强制触发路径单列；只在 buildRecallLogRecord({forced:true}) 时出现。
+  'user-task',
 ]);
 
 /** gate.why → 面板可读 trigger 口径。 */
@@ -54,6 +61,8 @@ export const RECALL_TRIGGER_BY_GATE = Object.freeze({
   'quiet': 'quiet',
   'empty-query': 'empty-query',
   'mid-turn': 'mid-turn',
+  // 1.8.8 M2：强制触发（不看 everyNTurns、不被 quiet 挡）。
+  'forced': 'forced',
 });
 
 export const RECALL_CHANNELS = Object.freeze(['file', ...EXTERNAL_PLUGIN_IDS, 'degraded']);
@@ -121,6 +130,46 @@ export function resolveChannel({ items = [], embeddingDegraded = false } = {}) {
   return external ?? 'file';
 }
 
+/** recall-log 里的 query 摘要上限（字符）；只留线索，不留整段对话。 */
+export const RECALL_QUERY_SUMMARY_MAX = 200;
+
+/** 日志里的敏感串：手机号 / 邮箱 / 身份证 / IPv4 / 长 token（key）。 */
+const LOG_PII_PATTERNS = Object.freeze([
+  /\b1[3-9]\d{9}\b/g,
+  /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+  /\b\d{17}[\dXx]\b/g,
+  /\b(?:\d{1,3}\.){3}\d{1,3}\b/g,
+  /\b[A-Za-z0-9_-]{24,}\b/g,
+]);
+
+/**
+ * 1.8.8 M2：recall-log 的 query 摘要（隐私友好）。
+ * 只做四件事：去控制字符、折叠空白、遮蔽常见敏感串、截到 200 字符。
+ * 不存整段用户消息，不做语义改写。
+ * @param {unknown} text
+ * @returns {string}
+ */
+export function summarizeQuery(text) {
+  let value = String(text ?? '');
+  value = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (value === '') return '';
+  for (const pattern of LOG_PII_PATTERNS) value = value.replace(pattern, '[已隐去]');
+  if (value.length > RECALL_QUERY_SUMMARY_MAX) value = `${value.slice(0, RECALL_QUERY_SUMMARY_MAX)}…`;
+  return value;
+}
+
+/** link 统计的最小化形状（只记词数/命中数，不记用户原句）。 */
+function summarizeLinkStat(link) {
+  if (!link || typeof link !== 'object') return null;
+  const terms = Array.isArray(link.matchedTerms) ? link.matchedTerms.map((t) => String(t)).filter((t) => t !== '').slice(0, 20) : [];
+  return {
+    enabled: link.enabled !== false,
+    matchedTerms: terms,
+    injectedCount: Number.isFinite(Number(link.injectedCount)) ? Math.max(0, Number(link.injectedCount)) : 0,
+    tokens: Number.isFinite(Number(link.tokens)) ? Math.max(0, Number(link.tokens)) : 0,
+  };
+}
+
 /**
  * 构造一条 recall-log 行（字段纯计算，不写盘）。
  * @param {object} input
@@ -134,6 +183,13 @@ export function resolveChannel({ items = [], embeddingDegraded = false } = {}) {
  * @param {boolean} [input.factoryUnavailable]
  * @param {boolean} [input.embeddingDegraded]
  * @param {unknown[]|null} [input.injectedItems] 覆盖注入项（factory 不可用时传 []）
+ * @param {string} [input.query] 1.8.8 M2：触发本轮的真实用户消息摘要（summarizeQuery 后写入）
+ * @param {number|null} [input.elapsedMs] 1.8.8 M2：agent/pre-step 内召回耗时（毫秒）
+ * @param {boolean} [input.forced] 1.8.8 M2：是否强制触发（autoRecall.forceOnUserMessage）
+ * @param {string|null} [input.why] 覆盖 why（强制路径固定 'user-task'）
+ * @param {string|null} [input.trigger] 覆盖 trigger（强制路径固定 'forced'）
+ * @param {boolean} [input.archiveUnavailable] 1.8.8 M2：归档兜底模块不可用/调用失败
+ * @param {object|null} [input.link] 1.8.8 M2：链路命中统计 {matchedTerms,injectedCount,tokens}
  * @returns {object}
  */
 export function buildRecallLogRecord({
@@ -147,16 +203,33 @@ export function buildRecallLogRecord({
   factoryUnavailable = false,
   embeddingDegraded = false,
   injectedItems = null,
+  query = '',
+  elapsedMs = null,
+  forced = false,
+  why: whyOverride = null,
+  trigger: triggerOverride = null,
+  archiveUnavailable = false,
+  link = null,
 } = {}) {
   const items = Array.isArray(injectedItems) ? injectedItems : (Array.isArray(result?.items) ? result.items : []);
   const hits = result?.hits && typeof result.hits === 'object' ? result.hits : null;
-  const why = classifyRecallWhy({ gate, items, error, factoryUnavailable });
+  const why = typeof whyOverride === 'string' && whyOverride !== ''
+    ? whyOverride
+    : classifyRecallWhy({ gate, items, error, factoryUnavailable });
   const dropped = summarizeDropped(hits, result?.rejections);
   const gateSummary = {
     recall: gate?.recall === true,
     why: typeof gate?.why === 'string' ? gate.why : 'unknown',
     everyNTurns: Number.isFinite(Number(everyNTurns)) ? Number(everyNTurns) : null,
   };
+  // 注意 Number(null) === 0：缺省（null/undefined/''）必须落 null，不能落 0。
+  const elapsedRaw = elapsedMs === null || elapsedMs === undefined || elapsedMs === '' ? null : Number(elapsedMs);
+  const elapsed = Number.isFinite(elapsedRaw) && elapsedRaw >= 0 ? Math.round(elapsedRaw) : null;
+  let outcome = 'zero-hit';
+  if (error === true) outcome = 'error';
+  else if (factoryUnavailable === true) outcome = 'factory-unavailable';
+  else if (items.length > 0) outcome = 'injected';
+  else if (gate && gate.recall !== true) outcome = 'gate-skip';
   return {
     at: at instanceof Date ? at.toISOString() : new Date(at).toISOString(),
     sessionId: String(sessionId ?? 'unknown'),
@@ -165,7 +238,16 @@ export function buildRecallLogRecord({
     eligible: hits ? (Number.isFinite(Number(hits.eligible)) ? Number(hits.eligible) : 0) : null,
     dropped,
     gate: gateSummary,
-    trigger: normalizeTrigger(gate?.why),
+    trigger: typeof triggerOverride === 'string' && triggerOverride !== ''
+      ? triggerOverride
+      : normalizeTrigger(gate?.why),
+    // 1.8.8 M2：强制触发 / 链路直连 / 归档兜底的取证字段。
+    forced: forced === true,
+    query: summarizeQuery(query),
+    elapsedMs: elapsed,
+    outcome,
+    archiveUnavailable: archiveUnavailable === true,
+    link: summarizeLinkStat(link),
     // D5 forward instrumentation: the existing recall result already carries the
     // rendered token estimate; never read a session or add a new parse path.
     estimatedTokens: Number.isFinite(Number(result?.tokens)) ? Number(result.tokens) : 0,
@@ -188,6 +270,8 @@ export function buildRecallLogRecord({
       title: item.title,
       score: Number(Number(item.score ?? 0).toFixed(3)),
       reason: item.reason ?? 'keyword',
+      // 1.8.8 M2：来源 file / link / archive；旧行缺该字段时按 file 读。
+      source: typeof item.source === 'string' && item.source !== '' ? item.source : 'file',
     })),
     blocked: (Array.isArray(result?.rejections) ? result.rejections : []).map((item) => ({
       id: item.path,
@@ -281,6 +365,10 @@ export function summarizeRecallRows(rows = [], options = {}) {
   let legacyRows = 0;
   let injectedRounds = 0;
   let emptyInjections = 0;
+  let forcedTotal = 0;
+  let archiveUnavailableTotal = 0;
+  let linkInjectedTotal = 0;
+  const byOutcome = {};
   let lastAt = null;
 
   const list = Array.isArray(rows) ? rows : [];
@@ -302,6 +390,12 @@ export function summarizeRecallRows(rows = [], options = {}) {
     const injected = Array.isArray(row.injected) ? row.injected : [];
     if (injected.length > 0) injectedRounds += 1;
     else emptyInjections += 1;
+    // 1.8.8 M2：强制触发 / 归档不可用 / 链路来源计数（只读已有字段，不猜）。
+    if (row.forced === true) forcedTotal += 1;
+    if (row.archiveUnavailable === true) archiveUnavailableTotal += 1;
+    if (injected.some((item) => item?.source === 'link')) linkInjectedTotal += 1;
+    const outcome = typeof row.outcome === 'string' && row.outcome !== '' ? row.outcome : 'unknown';
+    byOutcome[outcome] = (byOutcome[outcome] ?? 0) + 1;
     if (row.dropped && typeof row.dropped === 'object') {
       for (const key of Object.keys(dropped)) {
         if (key === 'total') continue;
@@ -321,6 +415,7 @@ export function summarizeRecallRows(rows = [], options = {}) {
     byWhy,
     byTrigger,
     byChannel,
+    byOutcome,
     injectedRounds,
     emptyInjections,
     policySkipTotal: byWhy['policy-skip'] + byWhy.quiet,
@@ -328,6 +423,10 @@ export function summarizeRecallRows(rows = [], options = {}) {
     zeroHitTotal: byWhy['zero-hit'],
     errorTotal: byWhy.error,
     everyNTurnsTotal: byWhy.everyNTurns,
+    forcedTotal,
+    userTaskTotal: byWhy['user-task'],
+    archiveUnavailableTotal,
+    linkInjectedTotal,
     dropped,
     lastAt,
   };

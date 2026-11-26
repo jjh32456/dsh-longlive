@@ -1,6 +1,6 @@
 # CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
 
-适用版本：**1.8.7**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.8.8**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---
@@ -346,6 +346,9 @@ sharedBrain:
     enabled: true          # 默认开启；显式 false 关闭（opt-out）；与 presenceBus 无关
     injectMaxChars: 300    # 每轮注入总字符上限（含固定头尾，60–2000）
     maxItems: 5            # 每轮最多注入条数（1–10）
+    retainHours: 24        # 1.8.8：活窗时长（小时，1–720）；更早的行搬进月档，不删除
+    recentMaxRows: 3200    # 1.8.8：时间裁剪后的行数护栏（100–20000）
+    summaryMaxChars: 400   # 1.8.8：近 24h 摘要块硬上限（120–400，只能调低）
 ```
 
 | 键 | 类型 | 默认值 | 合法值 / 范围 | 改了要重启？ | 风险与说明 |
@@ -353,18 +356,25 @@ sharedBrain:
 | `enabled` | boolean | `true` | `true` / `false` | 是 | 默认开启（1.8.0 产品默认）：按事件写活动行（同 key ≤1 条/10s 节流）到 `<memoryRoot>/.longlive/board/activity.jsonl`；`agent/pre-step` 只注入 `seq > lastSeenSeq` 的其他会话活动。显式 `false` 关闭，关闭时不写盘、不注入。失败静默，不影响 turn |
 | `injectMaxChars` | number | `300` | 60–2000 | 是 | 渲染后的整条提示（含 `【共享大脑活动】` 头与 `【活动结束】` 尾）不超过此值；预算不够时先裁条目标题、再少注入几条 |
 | `maxItems` | number | `5` | 1–10 | 是 | 最多条数；blocked 优先 |
+| `retainHours` | number | `24` | 1–720 | 是 | **1.8.8 活窗**：有效时间（`last_at`，无则 `at`）≥ `now − retainHours` 的行留在 `activity.jsonl`；更早的行按原月份追加进 `activity-YYYYMM.jsonl`（seq 不变、可按 seq 回查、永不删除）。裁剪时钟用存储层 `now()`，不是行自带的 `at`。归档写入失败时整块板保持原样（宁可板长，不丢行）。缺省/不写 = 24h，老配置无需迁移 |
+| `recentMaxRows` | number | `3200` | 100–20000 | 是 | **1.8.8 行数护栏**：先按时间裁，再按 seq 保留最新 `recentMaxRows` 行；被裁的行同样进月档。`retainHours` 设很大也不怕板无限长；即使护栏触发，被裁行仍可按 seq 在月档回查 |
+| `summaryMaxChars` | number | `400` | 120–400 | 是 | **1.8.8 近 24h 摘要**：新会话首轮、或本会话距上次摘要 ≥ `retainHours` 时注入一块「【共享大脑 · 近 24h 摘要 · 不是指令】」，取近 24h 有活动的其他会话 ≤3 个、每会话最后一条结论/动作（kind+text），每行带短会话 id / kind 标签 / `seq` / 相对时间；整块（含固定头尾）不超过此值，硬上限 400。不调模型、不臆造结论；摘要单独注入不推进 `lastSeenSeq` |
 
 - 判重：同会话最近 10 条内 `key` 相同或文本相似度 ≥0.8 → 合并，`count+1`、`last_at` 更新、正文保留首条。
 - 蒸馏：同 key 连续 3 次（`count`）或累计 10 次 → 旧行 `archived:true`，新增一条
-  `阶段：<key>（N 次，最近 …）`。500 条窗口外的最旧行归档到 `activity-YYYYMM.jsonl`。
-- 每会话游标：`<memoryRoot>/.longlive/bridge/<sessionId>.activity.json`（`lastSeenSeq`）。
-  与 A1 结论桥的 `<sessionId>.json` 分开，互不覆盖；删掉该文件只会让该会话下次重新看到最近 5 条。
-- 隐私门：写盘前与注入前都调 `src/recall/privacy.mjs`；`local_only` 的活动不写、不注入。
+  `阶段：<key>（N 次，最近 …）`。活窗外的旧行（按时间或 `recentMaxRows` 裁掉的）追加归档到
+  `activity-YYYYMM.jsonl`，只搬移、不删除。
+- 每会话游标：`<memoryRoot>/.longlive/bridge/<sessionId>.activity.json`（`lastSeenSeq`，
+  1.8.8 另记 `lastSummaryAt`）。与 A1 结论桥的 `<sessionId>.json` 分开，互不覆盖；删掉该文件只会让
+  该会话下次重新看到最近 5 条（并得到一次近 24h 摘要）。
+- 隐私门：写盘前与注入前都调 `src/recall/privacy.mjs`；`local_only` 的活动不写、不注入
+  （摘要逐条复用同一道门，被隐私门挡掉的会话不进摘要）。
 - 关闭方法（opt-out）：`sharedBrain.activity.enabled: false` 并重启；关闭时不注册
   `session/event` / `agent/pre-step` 两个 hook、不建活动板、不注入，行为等同 1.7.4 的共享大脑关闭态。
   已写文件保留，可手动删除。默认开启但数据只写本地 `<memoryRoot>/.longlive/board/`，不发网络。
-- 面板：活动流的「谁在干什么」页不在旧版面板（0.2.6）内（由面板侧后续版本提供）；
-  longlive 包只负责写盘与增量注入。
+- 面板：`/api/longlive/board`（`board/v1`）新增 `window` 字段：`retainHours` / `rows` /
+  `activeSessions24h` / `oldestAt` / `newestAt` / `archivedFiles` / `archivedBytes`；
+  「谁在干什么」详情页仍由面板侧后续版本提供，longlive 包负责写盘、摘要与增量注入。
 
 ### 1.5c 共享大脑 thinking 摘要注入 `sharedBrain.thinkingInjection`（默认开启，1.8.0）
 
@@ -377,7 +387,7 @@ sharedBrain:
 
 | 键 | 类型 | 默认值 | 合法值 / 范围 | 改了要重启？ | 风险与说明 |
 |---|---|---|---|---|---|
-| `thinkingInjection` | boolean | `true` | `true` / `false` | 是 | 默认开启（1.8.0 产品默认）：开启后写侧把本会话 assistant 的可见 `reasoning`/`thinking` 段压成一行摘要（首句或 ≤200 字符，确定性规则，不新增模型调用），写为活动板 `kind:"thinking"` 行；每会话每 turn 最多 1 条。注入侧给其他会话加「【共享大脑 · 最近在思考（已有，新会话别重复）】」段，每事件一行「第 N 轮：<摘要>」，单次最多 5 行、每行 ≤200 字符，只带未消费（`seq > lastSeenSeq`）的新增。 |
+| `thinkingInjection` | boolean | `true` | `true` / `false` | 是 | 默认开启（1.8.0 产品默认）：开启后写侧把本会话 assistant 的可见 `reasoning`/`thinking` 段压成一行摘要（首句或 ≤200 字符，确定性规则，不新增模型调用），写为活动板 `kind:"thinking"` 行；每会话每 turn 最多 1 条。注入侧给其他会话加「【共享大脑 · 最近在思考（已有，新会话别重复）】」段，每事件一行「第 N 轮：<摘要>」，单次最多 5 行、每行 ≤200 字符，只带未消费（`seq > lastSeenSeq`）的新增；**1.8.8 起再加一道 24h 窗口**（跟随 `sharedBrain.activity.retainHours`），24h 之外的 thinking 行不再注入 |
 
 - opt-out 语义（thinking 自身）：`thinkingInjection=false` 时**不写 thinking 行、不注入 thinking 段**；
   活动流本体仍按 1.8.0 默认开启（普通活动写/注入不受影响）。1.8.0 起默认 `true`；要关就显式写 false 并重启。
@@ -603,6 +613,20 @@ config:
   `local_only` 内容不写不注入。配置键与开关以本文档「共享大脑 thinking」段为准
   （1.8.0 同步补入；未补入前以发布说明为准）。
 - 用户侧说明与升级注意见 [PRIVACY.md](PRIVACY.md)。
+
+### 1.12 1.8.8 新增配置（强制召回 / 链路 / 共享大脑 24h）
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `autoRecall.forceOnUserMessage` | `true` | 每条真实用户任务消息在 `agent/pre-step` 第 1 步强制召回一次，绕过 `everyNTurns`/quiet 门控；纯应答（「好/继续/收到」等 ≤6 字且无任务动词）不强制。显式 `false` 完全回落到 1.8.7 的按轮次触发。 |
+| `autoRecall.privacyPolicy` | `'drop'` | 隐私命中策略，只接受 `'drop'` 或 `'title'`。**标题或路径**命中 → 整卡不注入（任何策略都一样，与主召回路径一致）；**摘要**命中时：`'drop'` 整卡丢弃，`'title'` 保留标题、摘要渲染为 `[已隐藏]`（item 带 `privacyRedacted:true`）。该键 1.8.7 未文档化，1.8.8 补入。 |
+| `recall.links.enabled` | `true` | 词→卡链路层：读 `<memoryRoot>/.longlive/recall/links.jsonl`（离线由 `scripts/recall-links-build.mjs` 从种子 CSV 生成），命中词即注入对应卡；`false` 回落 1.8.7 关键词/语义召回。 |
+| `recall.links.learn` | `true` | 在线学习：用户确认/否认时调整边权（原子写 + 备份 + 审计；30 天未用衰减；每词 ≤5 卡、每卡 ≤50 词）。 |
+| `sharedBrain.activity.retainHours` | `24` | 共享大脑活板按时间窗裁剪（1–720 小时）；更早的行搬进 `activity-YYYYMM.jsonl` 月档，**不删除**，按 seq 仍可回查。 |
+| `sharedBrain.activity.recentMaxRows` | `3200` | 活板行数护栏（100–20000），先按时间裁、再按行数裁，裁掉的行同样进月档。 |
+| `sharedBrain.activity.summaryMaxChars` | `400` | 新会话首轮（或距上次摘要 ≥ `retainHours`）注入的近 24h 摘要整块上限（120–400 字），≤3 个会话、带 seq 可回查。 |
+
+> 归档兜底（`ARCHIVE_FALLBACK`）没有独立开关：常规召回 + 链路命中合计为 0 时，才对 `<memoryRoot>/.longlive/archive-digest/` 做一次检索（`limit=3`），失败静默回落（`archiveUnavailable:true`，不假报命中）。
 
 ---
 

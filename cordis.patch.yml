@@ -7,7 +7,29 @@
 # Override with a name from src/router/policies/<name>.json:
 #         routerPolicyProfile: owner-rulings-2026-11-03
 #
+# 1.8.8: forced recall + link layer (M2). Every real user task message now forces
+# one recall at agent/pre-step step 1 — `autoRecall.forceOnUserMessage` (default
+# true; explicit false restores the 1.8.7 turn/topic trigger behaviour exactly).
+# Pure acknowledgements (好/嗯/ok/继续/谢谢/收到) never force. Recall now has a
+# word→old-card link layer: `recall.links.enabled` (default true; enabled:false =
+# 1.8.7 behaviour) direct-connects cards from `.longlive/recall/links.jsonl`, and
+# `recall.links.learn` (default true) nudges link weights from user confirm/deny
+# feedback (atomic write + backup + audit; decay after 30 days unused). Old-turn
+# archive fallback is used only when ordinary recall + links both come up empty.
+# Budget/dedupe/privacy are unchanged: ≤5 cards, ≤2000 tokens, already-injected
+# cards deduped, privacy-hit cards dropped whole, every failure fail-open.
+# The seed table is rebuilt offline from LINKS-SEED-v3.csv with
+#   node scripts/recall-links-build.mjs --csv <seed.csv> --memory-root <root>
+# (`--dry-run` prints stats; `--rollback <backup>` restores a backup atomically).
+# 1.8.8: the shared-brain activity board keeps a time-based live window
+# (`sharedBrain.activity.retainHours`, default 24h, plus a `recentMaxRows` row
+# guard) instead of a flat 500-row cap; rows outside the window move to
+# activity-YYYYMM.jsonl (never deleted, still findable by seq). A new session (or
+# one whose own recap is older than retainHours) also gets one ≤400-char recap of
+# the ≤3 sessions active in the window, built only from existing board rows.
+# Defaults change: retainHours 24 / recentMaxRows 3200 / summaryMaxChars 400.
 # 1.8.7: router startup anchor verification now counts `budget.overshoot.applied`
+
 # when a reservation has no matching `budget.settle` (fixes a false
 # E_LEDGER_TAMPERED / audit_used_regressed block after an overshoot). No defaults,
 # tool surface or config keys change.
@@ -88,6 +110,22 @@
           topK: 3
           budgetTokens: 2000
           everyNTurns: 6
+          # 1.8.8 (M2): every real user task message forces exactly one recall
+          # at agent/pre-step step 1, bypassing the everyNTurns/quiet gates;
+          # pure acknowledgements (≤6 chars, no task verb) never force. true is
+          # the 1.8.8 default; explicit false restores the exact 1.8.7 trigger.
+          forceOnUserMessage: true
+        # 1.8.8 (M2): word→old-card link layer. Reads
+        # <memoryRoot>/.longlive/recall/links.jsonl, built offline from
+        # LINKS-SEED-v3.csv by `node scripts/recall-links-build.mjs`. enabled:
+        # false restores 1.8.7 keyword/semantic recall; learn: true nudges edge
+        # weights from user confirm/deny (atomic write + backup + audit;
+        # 30-day-unused decay; ≤5 cards/term, ≤50 terms/card). Both blocks are
+        # passthrough keys (no schemastery leaf), read from the raw config row.
+        recall:
+          links:
+            enabled: true
+            learn: true
         identityCard:
           enabled: true
           path: '<memoryRoot>/STATE.md'
@@ -106,11 +144,20 @@
         # 1.6.1-rc.1 batch). On by default in 1.8.0; independent of presenceBus. When on,
         # activity events append rows to <memoryRoot>/.longlive/board/activity.jsonl
         # and agent/pre-step injects only rows newer than this session's lastSeenSeq. On by default in 1.8.0.
+        # 1.8.8: the shared-brain live board window is time-based (retainHours=24h);
+        # rows older than the window move to activity-YYYYMM.jsonl (never deleted,
+        # still findable by seq) and recentMaxRows=3200 is the row guard. A new
+        # session also gets one ≤400-char recap of the ≤3 sessions active in the
+        # window (summaryMaxChars), built only from existing board rows. The unread
+        # per-line injection and the 5-line thinking section are unchanged.
         sharedBrain:
           activity:
             enabled: true
             injectMaxChars: 300
             maxItems: 5
+            retainHours: 24
+            recentMaxRows: 3200
+            summaryMaxChars: 400
         # 1.6.9: memory/recall/forget v2 panel API (M2-F 16 read-only routes +
         # M2-G 16 actions + HMAC audit + panel integrity). On by default; when
         # off, NO route is registered and no v2 file is created (behaviour = 1.6.8). On by default in 1.8.0.

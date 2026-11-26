@@ -111,8 +111,14 @@ function clampItems(value, fallback = THINKING_MAX_ITEMS) {
  * excluded, payload-safe summaries only. Newest rows win when over the cap, but
  * they are returned oldest→newest so the injected lines read chronologically.
  *
+ * 1.8.8 M3: the window is explicit. When a finite `nowMs` and a positive
+ * `windowHours` are given, only rows whose effective time (`last_at ?? at`) is
+ * inside `nowMs - windowHours` are eligible; rows with an unparseable timestamp
+ * are dropped in that mode (we cannot prove they are inside the window). With
+ * no window arguments the behaviour is the 1.8.7 cursor-only behaviour.
+ *
  * @param {Array<object>} entries board rows
- * @param {{selfSessionId?:string,lastSeenSeq?:number,maxItems?:number,lineMax?:number}} [options]
+ * @param {{selfSessionId?:string,lastSeenSeq?:number,maxItems?:number,lineMax?:number,nowMs?:number,windowHours?:number}} [options]
  * @returns {Array<object>}
  */
 export function selectThinkingActivities(entries, options = {}) {
@@ -120,6 +126,11 @@ export function selectThinkingActivities(entries, options = {}) {
   const lastSeenSeq = Number.isInteger(options.lastSeenSeq) ? options.lastSeenSeq : 0;
   const maxItems = clampItems(options.maxItems);
   const lineMax = Number.isInteger(options.lineMax) ? options.lineMax : THINKING_LINE_MAX;
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : null;
+  const windowHours = Number.isFinite(options.windowHours) && options.windowHours > 0
+    ? options.windowHours
+    : null;
+  const cutoff = nowMs !== null && windowHours !== null ? nowMs - windowHours * 3600000 : null;
   const rows = [];
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (!entry || typeof entry !== 'object') continue;
@@ -127,6 +138,10 @@ export function selectThinkingActivities(entries, options = {}) {
     if (entry.kind !== THINKING_KIND) continue;
     if (selfSessionId !== null && entry.sessionId === selfSessionId) continue;
     if (entry.archived === true) continue;
+    if (cutoff !== null) {
+      const time = Date.parse(String(entry.last_at ?? entry.at ?? ''));
+      if (!Number.isFinite(time) || time < cutoff) continue;
+    }
     const summary = summarizeThinking(entry.text);
     if (summary === '') continue;
     if (!isThinkingPayloadSafe(summary)) continue;

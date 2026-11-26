@@ -40,6 +40,18 @@ export const ACTIVITY_SCHEMA_VERSION = 1;
 export const ACTIVITY_BOARD_DIR = 'board';
 export const ACTIVITY_FILE_NAME = 'activity.jsonl';
 export const ACTIVITY_RECENT_MAX = 500;
+/**
+ * 1.8.8 M3: the live window is time-based first. Rows whose effective time
+ * (`last_at ?? at`) is older than this move to the monthly archive instead of
+ * being kept forever; nothing is deleted. A missing/invalid config means 24h.
+ */
+export const ACTIVITY_RETAIN_HOURS = 24;
+/**
+ * 1.8.8 M3: hard row cap for the live window (the guard, not the rule). A
+ * fan-out storm can produce thousands of rows inside 24h; above this the
+ * oldest rows are archived first. Explicit `recentMax` still wins for tests.
+ */
+export const ACTIVITY_RECENT_MAX_ROWS = 3200;
 export const ACTIVITY_LOCK_STALE_MS = 10000;
 export const ACTIVITY_LOCK_TIMEOUT_MS = 2000;
 export const ACTIVITY_SESSION_RE = /^[a-z0-9][a-z0-9._-]{0,127}$/;
@@ -400,23 +412,76 @@ export function planDistillation(entries, options = {}) {
 }
 
 /**
- * Keep the newest `recentMax` rows in activity.jsonl. Older rows are appended
- * to their local-month archive first; if any archive append fails, nothing is
- * dropped (a slightly long board is better than data loss).
- *
- * Recency is `seq` (a refresh bumps the merged row's seq). The physical array
- * order is NOT trusted: the caller may hand us a board that grew past the cap
- * (a previous archive append failed) where the just-refreshed row still sits at
- * its old physical position. Slicing by array position would archive that row —
- * and then a sibling's seq-only cursor could never see the newest action.
+ * A row's effective activity time: `last_at ?? at`, in ms. A merged/refreshed
+ * row keeps its original `at` but moves `last_at` forward, so `last_at` is what
+ * says "this row is still active". Returns null for an unparseable timestamp.
  */
-function archiveOverflow(memoryRoot, entries, recentMax) {
-  if (entries.length <= recentMax) return entries;
-  const ordered = [...entries].sort((left, right) => (left?.seq ?? 0) - (right?.seq ?? 0));
-  const keep = ordered.slice(ordered.length - recentMax);
-  const drop = ordered.slice(0, ordered.length - recentMax);
+function activityRowTimeMs(row) {
+  const raw = row && typeof row === 'object' ? (row.last_at ?? row.at) : null;
+  const parsed = Date.parse(String(raw ?? ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * 1.8.8 M3: decide which board rows stay in the live window.
+ *
+ * Two rules, applied in this order (time first, then the row cap):
+ *   1. time: keep rows whose effective time (`last_at ?? at`) is within
+ *      `retainHours` of `nowMs`. Rows older than that leave the live board.
+ *   2. cap: if the survivors still exceed `recentMax`, keep the newest
+ *      `recentMax` by `seq` (a seq bump is what marks a refreshed row as
+ *      newly active).
+ *
+ * `last_at` first is deliberate: a refreshed row keeps its original `at` but
+ * gets a new `last_at`, so a rule keyed on `at` alone would archive the
+ * just-refreshed row and a sibling's seq-only cursor would stop seeing the
+ * latest action (the R1.5 contract).
+ *
+ * Rows whose timestamp cannot be parsed are kept (never drop data on
+ * ambiguity); they are still subject to the row cap.
+ *
+ * Pure: no I/O. Returns `{ entries, dropped }`; `entries` keeps input order.
+ */
+export function trimActivityWindow(entries, options = {}) {
+  const list = Array.isArray(entries) ? entries : [];
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const retainHours = Number.isFinite(options.retainHours) && options.retainHours > 0
+    ? options.retainHours
+    : ACTIVITY_RETAIN_HOURS;
+  const recentMax = Number.isInteger(options.recentMax) && options.recentMax > 0
+    ? options.recentMax
+    : ACTIVITY_RECENT_MAX_ROWS;
+  const cutoff = nowMs - retainHours * 3600000;
+  const kept = [];
+  const dropped = [];
+  for (const row of list) {
+    const time = activityRowTimeMs(row);
+    if (time !== null && time < cutoff) dropped.push(row);
+    else kept.push(row);
+  }
+  if (kept.length <= recentMax) return { entries: kept, dropped };
+  // Recency is seq here (as in 1.6.8): the physical array order is NOT trusted,
+  // because a board that grew past the cap may still hold the just-refreshed row
+  // at its old position; slicing by position would archive it.
+  const ordered = [...kept].sort((left, right) => (left?.seq ?? 0) - (right?.seq ?? 0));
+  const capDrop = ordered.slice(0, kept.length - recentMax);
+  const capDropSet = new Set(capDrop);
+  return {
+    entries: kept.filter((row) => !capDropSet.has(row)),
+    dropped: [...dropped, ...capDrop],
+  };
+}
+
+/**
+ * Apply the live window and archive the dropped rows first. An archive append
+ * failure keeps the whole board unchanged (a long board is better than data
+ * loss); the monthly archive is append-only and never deletes.
+ */
+function applyActivityWindow(memoryRoot, entries, options = {}) {
+  const trimmed = trimActivityWindow(entries, options);
+  if (trimmed.dropped.length === 0) return { entries, dropped: 0 };
   const groups = new Map();
-  for (const row of drop) {
+  for (const row of trimmed.dropped) {
     const month = monthKeyFor(row.at);
     if (!groups.has(month)) groups.set(month, []);
     groups.get(month).push(row);
@@ -427,15 +492,69 @@ function archiveOverflow(memoryRoot, entries, recentMax) {
       fs.appendFileSync(activityArchiveFile(memoryRoot, month), serializeActivityEntries(rows), 'utf8');
     }
   } catch {
-    return entries;
+    return { entries, dropped: 0 };
   }
-  return keep;
+  return { entries: trimmed.entries, dropped: trimmed.dropped.length };
+}
+
+/**
+ * Read-only live-window facts for the panel/status surface (M3 item 4):
+ * coverage hours, live rows, sessions active inside the window, and the
+ * monthly archive size. Never throws; absent board/archive is an empty state.
+ */
+export function summarizeActivityWindow(memoryRoot, options = {}) {
+  const retainHours = Number.isFinite(options.retainHours) && options.retainHours > 0
+    ? options.retainHours
+    : ACTIVITY_RETAIN_HOURS;
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+  const cutoff = nowMs - retainHours * 3600000;
+  const read = readEntries(memoryRoot);
+  const entries = read.ok ? read.entries : [];
+  const sessions = new Set();
+  let oldestMs = null;
+  let newestMs = null;
+  for (const row of entries) {
+    const time = activityRowTimeMs(row);
+    if (time === null) continue;
+    if (time >= cutoff && typeof row.sessionId === 'string') sessions.add(row.sessionId);
+    if (oldestMs === null || time < oldestMs) oldestMs = time;
+    if (newestMs === null || time > newestMs) newestMs = time;
+  }
+  let archivedBytes = 0;
+  let archivedFiles = 0;
+  try {
+    const dir = activityBoardDir(memoryRoot);
+    for (const name of fs.readdirSync(dir)) {
+      if (!ARCHIVE_RE.test(name)) continue;
+      try {
+        archivedBytes += fs.statSync(path.join(dir, name)).size;
+        archivedFiles += 1;
+      } catch {
+        /* a file that vanished between readdir and stat is just not counted */
+      }
+    }
+  } catch {
+    /* absent board dir = empty archive */
+  }
+  return {
+    retainHours,
+    rows: entries.length,
+    bad: read.ok ? read.bad : 0,
+    activeSessions24h: sessions.size,
+    oldestAt: oldestMs === null ? null : new Date(oldestMs).toISOString(),
+    newestAt: newestMs === null ? null : new Date(newestMs).toISOString(),
+    archivedFiles,
+    archivedBytes,
+  };
 }
 
 /**
  * Create the activity store.
  *
- * options: memoryRoot (required), now(), recentMax, privacyScan(text).
+ * options: memoryRoot (required), now(), privacyScan(text), and the 1.8.8 live
+ * window knobs `retainHours` (default 24) / `recentMaxRows` (default 3200; the
+ * legacy explicit `recentMax` still wins so 1.6.8 callers and tests are
+ * unchanged).
  * append() is synchronous and serialized across processes by the lock.
  */
 export function createActivityStore(options = {}) {
@@ -444,9 +563,16 @@ export function createActivityStore(options = {}) {
     : null;
   const now = typeof options.now === 'function' ? options.now : () => new Date();
   const privacyScan = typeof options.privacyScan === 'function' ? options.privacyScan : defaultPrivacyScan;
+  const retainHours = Number.isFinite(options.retainHours) && options.retainHours > 0
+    ? options.retainHours
+    : ACTIVITY_RETAIN_HOURS;
+  // Row cap precedence: an explicit `recentMax` (tests, 1.6.8 callers) wins,
+  // then the M3 `recentMaxRows` config, then the 1.8.8 default guard.
   const recentMax = Number.isInteger(options.recentMax) && options.recentMax > 0
     ? options.recentMax
-    : ACTIVITY_RECENT_MAX;
+    : (Number.isInteger(options.recentMaxRows) && options.recentMaxRows > 0
+      ? options.recentMaxRows
+      : ACTIVITY_RECENT_MAX_ROWS);
 
   function read() {
     if (!memoryRoot) return { ok: false, code: 'E_NO_ROOT', entries: [], bad: 0, exists: false };
@@ -467,7 +593,10 @@ export function createActivityStore(options = {}) {
    *   正文保留」 rule.
    *
    * Returns {ok, action:'appended'|'merged'|'refreshed'|'distilled', entry, seq,
-   *          mergedSeq, seqBumped, archivedCount, streamReset, code}.
+   *          mergedSeq, seqBumped, archivedCount, trimmedCount, streamReset, code}.
+   * `archivedCount` counts rows folded by distillation; `trimmedCount` counts
+   * rows that left the live window for the monthly archive (time window first,
+   * then the recentMaxRows guard). Neither ever deletes data.
    *
    * Sequel monotonicity (RE-R15.5): every successful write persists the max seq
    * seen to `<board>/.activity.seq`, and new rows start above max(board, archive,
@@ -558,7 +687,7 @@ export function createActivityStore(options = {}) {
           row.seq = seqFor(entries);
           seqBumped = true;
           // Keep 「array order tracks recency」 for callers that slice the array
-          // directly (archive overflow) — the row was just refreshed, so it
+          // directly (live-window trim) — the row was just refreshed, so it
           // must not stay parked at its old physical position.
           const parkedAt = entries.indexOf(row);
           if (parkedAt >= 0 && parkedAt !== entries.length - 1) {
@@ -604,7 +733,18 @@ export function createActivityStore(options = {}) {
         action = 'distilled';
       }
 
-      entries = archiveOverflow(memoryRoot, entries, recentMax);
+      // 1.8.8 M3: trim the live window by TIME first (retainHours), then by the
+      // recentMaxRows guard. Dropped rows go to the monthly archive (append-only)
+      // and stay retrievable by seq; an archive failure keeps the board intact.
+      // The trim clock is the store clock (`now()`), not `input.at`: a producer
+      // replaying old rows must still trim against the real current time.
+      const windowed = applyActivityWindow(memoryRoot, entries, {
+        nowMs: now().getTime(),
+        retainHours,
+        recentMax,
+      });
+      entries = windowed.entries;
+      const trimmedCount = windowed.dropped;
       const written = writeTextDurable(activityBoardFile(memoryRoot), serializeActivityEntries(entries));
       if (!written.ok) return { ok: false, code: 'E_WRITE', message: written.error };
       // High-water sidecar: keeps seq monotonic even if this board is deleted or
@@ -625,6 +765,7 @@ export function createActivityStore(options = {}) {
         mergedSeq,
         seqBumped,
         archivedCount,
+        trimmedCount,
         streamReset: streamReset !== null,
         recent: entries.length,
       };
@@ -635,6 +776,7 @@ export function createActivityStore(options = {}) {
     memoryRoot,
     boardFile: memoryRoot ? activityBoardFile(memoryRoot) : null,
     recentMax,
+    retainHours,
     read,
     append,
     highWater: () => readSeqHighWater(memoryRoot),

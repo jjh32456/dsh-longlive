@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — 结构、边界与数据流（1.8.7，≤150 行）
+# ARCHITECTURE.md — 结构、边界与数据流（1.8.8，≤150 行）
 
 读者：要知道"谁在什么时候写哪个文件、为什么不能都在宿主里做"的运维/排障人员。
 
@@ -67,7 +67,7 @@
 | CLI | `scripts/truncate-cli.mjs` | 无工具层的最小切口；自带 live 拒绝 | **宿主外** |
 | doctor | `scripts/longlive-doctor.mjs` | 可选依赖/版本/安装计划；默认只读 | **宿主外** |
 | 面板 | `@jjh32456/dsh-longlive-panel@1.8.0` | 六层视图/截断记录/过滤器决策（未并入，显示样例）/影子记录/常驻 Router，只读 | 独立可选插件 |
-| 共享大脑活动流 | `src/activity/*`（`sharedBrain.activity`，1.8.0 起默认开启） | 事件级写活动行（同 key ≤1 条/10s；turn/end 写结论行）到 `.longlive/board/activity.jsonl`；agent/pre-step 只注入其他会话的增量（判重/蒸馏/500 条窗口）；与 `presenceBus` 解耦 | 宿主内（只写记忆根） |
+| 共享大脑活动流 | `src/activity/*`（`sharedBrain.activity`，1.8.0 起默认开启） | 事件级写活动行（同 key ≤1 条/10s；turn/end 写结论行）到 `.longlive/board/activity.jsonl`；agent/pre-step 只注入其他会话的增量（判重/蒸馏/24h 活窗 + 3200 行护栏，超出窗口的行只搬进 `activity-YYYYMM.jsonl` 月档、不删除）；与 `presenceBus` 解耦 | 宿主内（只写记忆根） |
 | 校验器 | `<tools-dir>\ops\tools\verify-truncation.mjs`（本机示例，不在包内） | V1–V7 结构验收；不写不修 | **宿主外** |
 
 ---
