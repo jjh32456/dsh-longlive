@@ -1,3 +1,4 @@
+# 1.8.12: package renamed to @jjh32456/longlive (npm); install/path docs synced.
 # Defaults are intentionally complete: the plugin works with this file as-is.
 # The memory root defaults to <DSH home>/longlive-memory (created on first use)
 # and can be overridden here, or by DSH_LONGLIVE_MEMORY_ROOT / legacy DSH_MEM.
@@ -74,7 +75,7 @@
   disabled: true
 - insert:
     - id: compaction-hot-truncate
-      name: '@jjh32456/dsh-longlive/compaction'
+      name: '@jjh32456/longlive/compaction'
       config:
         hotTruncate:
           mode: cut
@@ -84,7 +85,7 @@
           minCutTokens: 0
 - insert:
     - id: session-longlive
-      name: '@jjh32456/dsh-longlive'
+      name: '@jjh32456/longlive'
       config:
         keepEvents: 20000
         recentWriteWindowMs: 60000

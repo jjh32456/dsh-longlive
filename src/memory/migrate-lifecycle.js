@@ -222,6 +222,19 @@ export function defaultPlanPath() {
   return fileURLToPath(new URL(`./${DEFAULT_PLAN_FILE}`, import.meta.url));
 }
 
+/**
+ * 1.8.12 隐私修复：npm 包不再随附 lifecycle-plan.json（它逐字包含真实记忆内容）。
+ * 默认计划解析顺序：显式 --plan > <memoryRoot>/.longlive/lifecycle-plan.json > 包内默认（仅仓库内存在）。
+ */
+export function resolveDefaultPlanPath({ memoryRoot = '', planPath = null } = {}) {
+  if (planPath) return planPath;
+  if (memoryRoot) {
+    const rooted = path.join(memoryRoot, LONGLIVE_DIR, DEFAULT_PLAN_FILE);
+    if (fs.existsSync(rooted)) return rooted;
+  }
+  return defaultPlanPath();
+}
+
 export function migrationsDir(root) {
   return resolveInside(root, path.join(LONGLIVE_DIR, 'lifecycle-migrations'));
 }

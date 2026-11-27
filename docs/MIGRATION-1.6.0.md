@@ -1,5 +1,7 @@
 # 1.6.0 迁移：`dsh-session-longlive` → `dsh-longlive`（久视）
 
+> 2026-11-27 补充：npm 包名现已改为 `@jjh32456/longlive`；本文其余命令里的旧名是 1.6.0 时期的历史写法，照做时把安装名换成新名。
+
 > 适用对象：已经装过 `dsh-session-longlive@1.5.0`（或更早 1.4.0/1.5.0-rc）的 profile。
 > 全新安装不需要看本文，直接按 [QUICKSTART.md](QUICKSTART.md) 装 1.6.0 即可。
 >

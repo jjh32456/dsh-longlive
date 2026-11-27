@@ -1,4 +1,50 @@
-# 1.8.10 可选能力与开关
+# 1.8.12 可选能力与开关
+
+## 1.8.11 记忆网络：关系边 + 1-hop 扩展（默认随数据文件生效）
+
+- **边表**：`<memoryRoot>/.longlive/recall/edges.jsonl`（schema `recall-edges/v1`），每条边有
+  `from / to / type / evidence{path,sha256,lines,quote} / confidence`。八类边：
+  `supersedes / superseded_by / deprecated_by / conflicts_with / answers_with / derived_from /
+  mentions / same_topic`。
+- **来源**：`scripts/edges-build.mjs` 从三处构建——`links.jsonl` 同词共现（same_topic，不参与注入
+  扩展，只进网络/backlinks）、卡面 frontmatter 显式边与 body `[[wikilink]]`（mentions）、
+  `lifecycle-plan.json` 的决策记录。构建幂等、原子写、坏引用计数，`--dry-run` 只预览不写。
+- **注入扩展**：自动召回的基础命中之后，按 1-hop 边扩展，优先级
+  `deprecated_by > conflicts_with > superseded_by > answers_with`；扩展条目带
+  `edge:{from,to,type,evidence}`，在证据包里能看到具体边；总条数仍受 ≤5 张 / ≤2000 tokens 约束。
+- **失败语义**：边表缺失/坏行/坏引用 fail-open，只丢该边并计数，不挡召回；没有边表时行为与
+  1.8.10 相同。
+- **开关**：无配置开关。想启用就生成边表；不想用可删/清空 `edges.jsonl`（或 `--no-links`/`--no-cards`
+  重建）。每次重建都覆盖为最新，二次构建同输入字节幂等。
+
+## 1.8.11 蒸馏：卡生命周期 canonical / historical（默认随卡字段生效）
+
+- **字段**：卡前言可加独立字段 `lifecycle: canonical | historical`。它**不读写 `status`**，
+  也不改 `statusCounts`/INDEX 计数；没有该字段的卡按「普通」处理，不写默认。
+- **注入与排序**：`historical` 卡默认不进注入；显式历史查询（"以前/旧版/之前…"）放行并在注入里
+  标 `〔历史口径：此卡已被后续结论取代〕`；`canonical` 在排序主键里排最前，普通卡居中，
+  historical 最后。「现行」查询不会再被旧卡压过。
+- **工具层**：`memory_recall` 对 historical 卡分数 ×0.3（显式历史查询不降权），结果带
+  `lifecycle` 字段；`memory_recall_v2` 自动继承。检索层仍可搜到 historical（不删数据）。
+- **证据包**：`evidence-package/v1` 的 anchors 增 `lifecycle` / `edge`，能指到卡位置与具体边。
+- **迁移工具**：`scripts/migrate-lifecycle.mjs`（仓库内提供；npm 包不含计划文件）：
+  `--mode plan` 只读生成差异；`--mode dry-run` 在副本上串跑 `memory_index → memory_recall →
+  memory_reinforce → memory_consolidate`；`--mode apply` 备份卡 + INDEX + `.longlive` 状态后应用，
+  校验失败 `E_APPLY_VERIFY` 自动还原，二次 apply 幂等；`--mode rollback` 按 manifest 逐字节恢复
+  （保留 apply 审计并追加 rollback 审计）。真根 apply/rollback 需要显式 `--allow-real-root`，
+  且会拒绝 junction/符号链接别名。
+- **计划解析（1.8.12）**：显式 `--plan <file>` > `<memoryRoot>/.longlive/lifecycle-plan.json` >
+  包内默认（npm 包不含，仅仓库内存在）；找不到时返回 `E_PLAN_MISSING`（exit 3）并给出指引。
+
+## 1.8.12 隐私与发布面
+
+- npm 包不再包含 `src/memory/lifecycle-plan.json`（真实记忆内容）与 `scripts/acceptance-1.8.11.mjs`
+  （个人名/真实库路径）；验收脚本改为仓库内门禁（repo-only）。
+- 验收 fixture `test/fixtures/pre-step-container.mjs` 随包，安装包内可直接跑
+  `scripts/acceptance-1.8.11.mjs`（仓库版）；真根已迁移时脚本显式返回 `E_ALREADY_MIGRATED`（exit 2），
+  不再给出误导性失败。
+- 隐私门 `scripts/check-no-personal-strings.mjs` 扫 `src/`、`lib/`；发布前还会对 tgz 解包目录做
+  绝对路径/个人目录名扫描（仓库内发版门脚本，npm 包不含）。
 
 ## 1.8.8 自动回忆指向（forced recall + link，默认开启）
 
@@ -79,7 +125,7 @@ sharedBrain.thinkingInjection / autoMaintenance / D2 / D6 / routerEnabled / rout
 的可选能力与默认值沿用 1.6.0。
 
 1.6.0 是**改名 + 普适化 + 设置页 + 安全默认**版：包名 `dsh-session-longlive` →
-`@jjh32456/dsh-longlive`，显示名「久视」（英文 Longlive）。在这条改名基座上并入可移植记忆根、
+`@jjh32456/longlive`，显示名「久视」（英文 Longlive）。在这条改名基座上并入可移植记忆根、
 Config schema（1.6.0 为 80 节点，1.6.4 增加 `hotTruncate` 块后为 85，本次活动流
 `sharedBrain.activity` 再 +5 为 90）与设置页客户端，并把 `autoTruncate` / `routerRuntime` / `worker_*`
 三个默认值收到发布口径（见下文与 [CONFIG.md](CONFIG.md)）。迁移步骤见
@@ -442,7 +488,7 @@ Router 的 50 个配置键见 [CONFIG.md](CONFIG.md)；契约测试在 `test/rou
 ### `hotTruncate`（热截断，`compaction-hot-truncate` 行，默认接管压缩）
 
 热截断是 1.6.3 起包内 `cordis.patch.yml` 默认插入的 cut-only 压缩引擎
-（`@jjh32456/dsh-longlive/compaction`）：不调 LLM，只把「已完成、且早于保留窗口」的整轮换成一条
+（`@jjh32456/longlive/compaction`）：不调 LLM，只把「已完成、且早于保留窗口」的整轮换成一条
 覆盖率指针，原文先归档。它的配置写在 `compaction-hot-truncate` 条目的
 `config.hotTruncate` 下，**不属于** `session-longlive` 行。
 

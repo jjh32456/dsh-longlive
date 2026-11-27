@@ -21,7 +21,7 @@ import {
   rollbackLifecycleMigration,
   dryRunLifecycleMigration,
   listLifecycleMigrations,
-  defaultPlanPath,
+  resolveDefaultPlanPath,
 } from '../src/memory/migrate-lifecycle.js';
 import { memoryRootFromConfig, defaultMemoryRoot, isInsideRoot } from '../src/memory/paths.js';
 
@@ -99,7 +99,20 @@ if ((mode === 'apply' || mode === 'rollback') && touchesRealRoot && args['allow-
   });
 }
 
-const planPath = typeof args.plan === 'string' ? args.plan : defaultPlanPath();
+const planPath = resolveDefaultPlanPath({
+  memoryRoot: root,
+  planPath: typeof args.plan === 'string' ? args.plan : null,
+});
+
+// 1.8.12 隐私修复：npm 包不再随附 lifecycle-plan.json（逐字含真实记忆内容）。
+// plan/dry-run/apply 在找不到计划时给出明确指引，而不是抽象 E_PLAN_MISSING。
+if ((mode === 'plan' || mode === 'dry-run' || mode === 'apply') && !fs.existsSync(planPath)) {
+  fail('E_PLAN_MISSING', `lifecycle 迁移映射不在 npm 包内（1.8.12 起）：${planPath}。`
+    + '请用 --plan 指定仓库内 src/memory/lifecycle-plan.json，或把计划放到 <memoryRoot>/.longlive/lifecycle-plan.json。', {
+    planPath,
+    memoryRoot: root,
+  });
+}
 
 try {
   let receipt = null;

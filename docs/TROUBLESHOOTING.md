@@ -1,4 +1,4 @@
-# TROUBLESHOOTING.md — 按症状查（1.8.10）
+# TROUBLESHOOTING.md — 按症状查（1.8.12）
 
 用法：先看「症状」，对不上再看「最可能原因」。每条只给**一条**验证命令——先确认判断，再动手。
 「什么时候该停手」比「怎么修」更重要：结构一旦不对，继续重试只会扩大损失。
@@ -194,8 +194,8 @@ Get-Process 'DeepSeek Harness' -ErrorAction SilentlyContinue | Select-Object Id,
 **验证（一条）**：
 
 ```powershell
-(Get-Content "$P\package.json" -Raw | Select-String '@jjh32456/dsh-longlive').Line;
-(Get-Content "$P\node_modules\@jjh32456\dsh-longlive\package.json" -Raw | ConvertFrom-Json).version;
+(Get-Content "$P\package.json" -Raw | Select-String '@jjh32456/longlive').Line;
+(Get-Content "$P\node_modules\@jjh32456\longlive\package.json" -Raw | ConvertFrom-Json).version;
 Get-Process 'DeepSeek Harness' | Select-Object Id,StartTime
 ```
 

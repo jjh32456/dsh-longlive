@@ -8,7 +8,7 @@
 
 **读完你会得到什么**：从一台已经装好 DSH 的 Windows 机器出发，装好 longlive，用 `dryrun` 看它「打算怎么剪」，再切到 `request`，最后安全地完成第一次真截断，并且知道怎么退回去。
 
-> 适合谁：第一次拿到 `jjh32456-dsh-longlive-1.8.10.tgz` 的人。全程约 20 分钟，其中真截断那一步应用会自己关闭再打开（VM 实测约 31.5 秒），请挑你不用电脑的时候做。
+> 适合谁：第一次拿到 `jjh32456-longlive-1.8.12.tgz` 的人。全程约 20 分钟，其中真截断那一步应用会自己关闭再打开（VM 实测约 31.5 秒），请挑你不用电脑的时候做。
 >
 > 本文默认 DSH home 是 `%USERPROFILE%\.dsh`；如果你设过 `DSH_HOME`，把命令里的这段整体换掉。
 
@@ -35,10 +35,10 @@ $TGZ = '<path-to-tgz>'   # 换成真实绝对路径
 
 & $DSH plugin --profile desktop add "file:$TGZ"
 & $DSH plugin --profile desktop list --depth 0
-& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
+& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
 
-**你应该看到**：`list` 里出现 `@jjh32456/dsh-longlive@1.8.10`；doctor 打印一张表，最后是「全部可选依赖已启用。」或只有 engram 缺失的提示。
+**你应该看到**：`list` 里出现 `@jjh32456/longlive@1.8.12`；doctor 打印一张表，最后是「全部可选依赖已启用。」或只有 engram 缺失的提示。
 
 **报错了怎么办**：
 - `ENOENT` → `file:` 后面必须是**真实存在的绝对路径**，用正斜杠；不要把 `~` 写进去。
@@ -51,7 +51,7 @@ $TGZ = '<path-to-tgz>'   # 换成真实绝对路径
 上面第 3 条已经跑过。想看得更细：
 
 ```powershell
-& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop --json
+& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\longlive\scripts\longlive-doctor.mjs" --profile desktop --json
 ```
 
 **你应该看到**：JSON 里每个依赖有 `status`；退出码 `0`（全齐）或 `1`（只缺可选项，或没检测到 profile）都算正常。
@@ -64,7 +64,7 @@ $TGZ = '<path-to-tgz>'   # 换成真实绝对路径
 
 ```yaml
 - id: session-longlive
-  name: '@jjh32456/dsh-longlive'
+  name: '@jjh32456/longlive'
   config:
     autoTruncate:
       enabled: true
@@ -110,7 +110,7 @@ Get-Content "$env:USERPROFILE\.dsh\longlive-memory\.longlive\logs\auto-truncate.
 
 ```powershell
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-  "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\auto-truncate-run.ps1" `
+  "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\longlive\scripts\auto-truncate-run.ps1" `
   -MemoryRoot "$env:USERPROFILE\.dsh\longlive-memory" -DryRun
 ```
 
@@ -145,7 +145,7 @@ $bak = Get-ChildItem "$dir\session.v4.jsonl.zstd.bak-*" | Sort-Object LastWriteT
 Copy-Item $bak.FullName "$dir\session.v4.jsonl.zstd" -Force
 ```
 
-**回滚插件**：`& $DSH plugin --profile desktop remove @jjh32456/dsh-longlive`，重启。卸载**不会**删 `longlive-memory`、`.bak-YYYYMMDD` 和 `session.v4.jsonl.zstd.archive/`。
+**回滚插件**：`& $DSH plugin --profile desktop remove @jjh32456/longlive`，重启。卸载**不会**删 `longlive-memory`、`.bak-YYYYMMDD` 和 `session.v4.jsonl.zstd.archive/`。
 
 **你应该看到**：会话恢复到截断前的消息数；插件从 `list` 里消失。
 **报错了怎么办**：提示会话仍被占用 → 还有 DSH 进程没退干净；**不要**在宿主运行时覆盖文件。

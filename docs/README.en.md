@@ -1,10 +1,10 @@
-# @jjh32456/dsh-longlive (Longlive)
+# @jjh32456/longlive (Longlive)
 
 A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back it up, and shrink it safely** before the context window fills up. No standalone panel; no network requests or telemetry in the default configuration (Router / RouterFace / embedding call the provider you configure, only after you enable them).
 ## What you get
 
 - **22 tools** for session health/backup/compaction/truncation, on-demand original-text fetch, memory cards, workers (fan-out is unavailable until `workers.enabled: true`), and the live-session registry.
-- A built-in settings-page companion: `plugins.row.config` under `@jjh32456/dsh-longlive#session-longlive` with seven feature switches (D2/D6/auto-recall/presence bus/background face/daily maintenance/Router). Profiles without a Web server simply get no route.
+- A built-in settings-page companion: `plugins.row.config` under `@jjh32456/longlive#session-longlive` with seven feature switches (D2/D6/auto-recall/presence bus/background face/daily maintenance/Router). Profiles without a Web server simply get no route.
 - A memory store at `<DSH home>/longlive-memory` (on Windows: `%USERPROFILE%\.dsh\longlive-memory`), created on first start.
 - Optional: the separate read-only panel `@jjh32456/dsh-longlive-panel@1.8.0` adds a sidebar named **潜望镜 (Periscope)**. The plugin itself ships no UI.
 - Optional and **off by default**: `sharedBrain.activity` writes one local-rule activity row per turn and injects only unseen rows from other sessions (max 5 rows / 300 chars; zero tokens when nothing is new). Independent of `presenceBus`.
@@ -16,9 +16,9 @@ A DeepSeek Harness plugin that keeps a long session healthy: **inspect it, back 
 $DSH  = '<DSH install>\resources\runtime\cli\bin\dsh.cmd'
 $NODE = '<DSH install>\resources\runtime\primary-runtime\dependencies\node\bin\node.exe'
 & $DSH plugin --profile desktop add "file:<path-to-tgz>"
-# e.g. `dist/jjh32456-dsh-longlive-1.8.10.tgz` (built by `npm pack`; version pinned to package.json)
+# e.g. `dist/jjh32456-longlive-1.8.12.tgz` (built by `npm pack`; version pinned to package.json)
 & $DSH plugin --profile desktop list --depth 0
-& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
+& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
 
 The commands above call `& $DSH` directly (the `dsh.cmd` path set above); if `dsh` is already on PATH you can drop the `& $DSH` prefix.

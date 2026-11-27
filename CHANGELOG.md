@@ -2,6 +2,24 @@
 
 > 本文件只保留用户可读的功能与修复摘要；内部开发日志单独保存，不随发布包分发。
 
+## 1.8.12 — 2026-11-27
+
+**包名变更（2026-11-27）**：npm 包名由 `@jjh32456/dsh-longlive` 改为 `@jjh32456/longlive`；旧包已整包删除，旧版本号不可再复用；本版为新包首版。安装名、doctor 路径、profile 配置键（`@jjh32456/longlive#session-longlive`）随之变化。
+
+**发布包修复：安装包内可直接运行验收脚本；真根已迁移时验收显式拒绝。**
+
+- `package.json` files 白名单加入 `test/fixtures/pre-step-container.mjs`：修复 1.8.11 包里
+  `scripts/acceptance-1.8.11.mjs` 因缺该 fixture 而 `ERR_MODULE_NOT_FOUND`（1.8.11 包审计只做了
+  `node --check`，未实际执行验收脚本）。
+- `scripts/acceptance-1.8.11.mjs` 增加已迁移真根守卫：plan 无 pending（cards/extracts/targets/edges 全 already）时
+  返回显式 `E_ALREADY_MIGRATED`（exit 2），不再给出 e1/e7/n5 的误导性失败；未迁移副本上仍为 14/14。
+  已知边界同步登记 `kb-acceptance-requires-unmigrated-root` / `kb-package-acceptance-fixture-shipped`。
+- **隐私修复（npm 包面）**：`src/memory/lifecycle-plan.json`（逐字含真实记忆内容）与
+  `scripts/acceptance-1.8.11.mjs`（个人名/真实库绝对路径）不再随 npm 包发布；迁移 CLI 的默认计划改为
+  「显式 `--plan` > `<memoryRoot>/.longlive/lifecycle-plan.json` > 仓库内路径」，缺失时给
+  `E_PLAN_MISSING` 明确指引；验收脚本改为仓库内门禁（repo-only）。
+- 无运行时行为变化；插件运行时代码与 1.8.11 相同（仅打包清单、迁移 CLI 计划解析与验收脚本）。
+
 ## 1.8.11 — 2026-11-26
 
 **记忆网络 + 蒸馏：关系边、卡生命周期、排序与迁移工具。**

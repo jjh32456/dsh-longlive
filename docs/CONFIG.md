@@ -1,6 +1,6 @@
-# CONFIG.md — @jjh32456/dsh-longlive（久视）配置手册
+# CONFIG.md — @jjh32456/longlive（久视）配置手册
 
-适用版本：**1.8.10**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
+适用版本：**1.8.12**（以包内 `package.json` 的 `version` 为准）。所有默认值以该源码树为准。
 读者：会改 YAML、会看日志，但没参与开发的人。
 
 ---
@@ -164,7 +164,7 @@ autoTruncate:
 
 ### 1.4a 热截断 `hotTruncate`（`compaction-hot-truncate` 行，默认接管压缩）
 
-热截断是包内 `cordis.patch.yml` 默认插入的 cut-only 压缩引擎（`@jjh32456/dsh-longlive/compaction`）。
+热截断是包内 `cordis.patch.yml` 默认插入的 cut-only 压缩引擎（`@jjh32456/longlive/compaction`）。
 它的配置写在 **`compaction-hot-truncate` 条目**的 `config.hotTruncate` 下，不写在
 `session-longlive` 条目里；两个条目改完都要重启宿主。宿主的 stock `compaction-basic` 行被
 patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 仍可用。
@@ -172,7 +172,7 @@ patch 关掉，引擎加载失败时 `entry.js` 自动回退 stock，`/compact` 
 ```yaml
 - insert:
     - id: compaction-hot-truncate
-      name: '@jjh32456/dsh-longlive/compaction'
+      name: '@jjh32456/longlive/compaction'
       config:
         hotTruncate:
           mode: cut
@@ -333,7 +333,7 @@ autoProcedure:
 **1.6.0 新增：插件自带的设置页伴侣**（不是上面的面板包）。`package.json` 的 `./client` +
 `src/ui/*` 在宿主设置页的插件行注册 `plugins.row.config`，标题「久视 · 功能开关」，提供 7 个
 开关（D2 / D6 / 自动想起 / 共享大脑 / 后台面 / 每日维护 / Router）和只读 memoryRoot 展示；
-slot key 为 `@jjh32456/dsh-longlive#session-longlive`（包名已改，row id 仍是 `session-longlive`）。
+slot key 为 `@jjh32456/longlive#session-longlive`（包名已改，row id 仍是 `session-longlive`）。
 保存走宿主 `configEditor.edit` 写回 profile patch，再由 Loader 常规重载；没有 `webServer`
 的 profile 不注册 `/api/longlive/flags`，插件照常加载。`workers.enabled` 不在 7 个面板开关里，
 需要直接改配置。

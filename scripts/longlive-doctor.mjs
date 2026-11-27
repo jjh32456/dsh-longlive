@@ -31,7 +31,7 @@ import { cleanupStaleLocks } from '../src/util/stale-locks.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const PLUGIN = '@jjh32456/dsh-longlive';
+const PLUGIN = '@jjh32456/longlive';
 const AUDIT_FILE = 'longlive-doctor-audit.log';
 
 let manifest = {};

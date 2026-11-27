@@ -76,7 +76,7 @@ import { registerAutoProcedure } from './autoprocedure/index.js';
 import { registerPanelApiRoutes } from './ui/panel-api.js';
 import { registerUiRoutes } from './ui/routes.js';
 
-export const name = '@jjh32456/dsh-longlive';
+export const name = '@jjh32456/longlive';
 export const inject = ['tools'];
 /** The engines.dsh range this build was tested against (also in package.json). */
 export const HOST_RANGE = declaredHostRange();

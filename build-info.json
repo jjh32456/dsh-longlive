@@ -1,20 +1,20 @@
 {
   "schema": 1,
-  "name": "@jjh32456/dsh-longlive",
-  "version": "1.8.11",
-  "expectedVersion": "1.8.11",
+  "name": "@jjh32456/longlive",
+  "version": "1.8.12",
+  "expectedVersion": "1.8.12",
   "builtBy": "scripts/pack.mjs",
-  "generatedAt": "2026-11-26T14:37:15.297Z",
-  "fileCount": 309,
-  "sourceTreeSha256": "9b559fda86eef0b547ddaec27999f3ce1a15c7fc9b5d98fd724199d349904433",
+  "generatedAt": "2026-11-27T01:17:54.110Z",
+  "fileCount": 308,
+  "sourceTreeSha256": "87ef39d9537c83cff29099822110161fa8a7943c20e82a49e56d867ff00cbca2",
   "manifestExcludes": [
     "build-info.json"
   ],
   "files": [
     {
       "path": "CHANGELOG.md",
-      "bytes": 23735,
-      "sha256": "a39c78ec9447ff7a2b15e1409e1080a0ea93fb9d15c26c9ea5b2d2d3b822d7de"
+      "bytes": 25347,
+      "sha256": "9275cf30eed4c940c20dadb1e4b7a02a6fc3e4107bd6ec98a0d199cfda24e164"
     },
     {
       "path": "LICENSE",
@@ -23,28 +23,28 @@
     },
     {
       "path": "QUICKSTART.md",
-      "bytes": 18018,
-      "sha256": "5d0c1d0500c29a8cf1a3c6f71a08a288483d6aac9e1cabf74eb467400110665a"
+      "bytes": 17966,
+      "sha256": "a14c9687f9e73234a9ca486aa514ab31c0ba4916f8c3ff0d9ae4103fd8e990bd"
     },
     {
       "path": "README.en.md",
-      "bytes": 6074,
-      "sha256": "5bba04638fc33f483d393b00e6e4de5549ab2c202cedc5bd2372669f8f6987e8"
+      "bytes": 6062,
+      "sha256": "e5c2e126629bac7f6014269ff4278dbee531f8f795f8e3e437b08144d2ff42e8"
     },
     {
       "path": "README.md",
-      "bytes": 17198,
-      "sha256": "17d194e5f74acf2587fff08f310728405dd36689838917a156941cc673a77f48"
+      "bytes": 19294,
+      "sha256": "4773c89b9623789ea4e32fe0d5cd638247b761654378e1f2ffbc184d30719d1b"
     },
     {
       "path": "SPEC.md",
-      "bytes": 22955,
-      "sha256": "65530f8c8f84e3b931395a4f6d533374cbb2b49471dca10cafa41802eb6f5cfb"
+      "bytes": 23139,
+      "sha256": "bcaa7b7a2eeb437114e628420d7b0633a2f5be8a549947947a9c6c0213c07ef4"
     },
     {
       "path": "cordis.patch.yml",
-      "bytes": 10322,
-      "sha256": "fcecbd9f58606c9a224b0223980d30486fee3bfbeb467e276f7f7a792b7504cb"
+      "bytes": 10396,
+      "sha256": "086e2cc99ce6ca304b593e039b77747b1f7b2feff0b135de8e776ea5d79a4d73"
     },
     {
       "path": "docs/A1-MIGRATION.md",
@@ -78,23 +78,23 @@
     },
     {
       "path": "docs/CONFIG.md",
-      "bytes": 60046,
-      "sha256": "44afebf8ddbd926af0f3396c9ee37cd1a95ff6dd9188d2b10c3735c321eef8a6"
+      "bytes": 60030,
+      "sha256": "71069a9d506ec9aaca8323adc37b4d143abb6aff84f1173e24bc2656777ddae3"
     },
     {
       "path": "docs/ERRORS.md",
-      "bytes": 27383,
-      "sha256": "7d100b98da78d9c5fe7bf31567a22526d219729a508990a11c53c506b9f4ecb8"
+      "bytes": 27379,
+      "sha256": "8de2027c32d148e04c8708c9d7a64269f91ee8c5d84b6d156122fbbef2f7bf8e"
     },
     {
       "path": "docs/FAQ.md",
-      "bytes": 12763,
-      "sha256": "3848c20b6ef9c402b011079c80f3c99bc8d358021216501485459ad42ae29160"
+      "bytes": 12755,
+      "sha256": "470218ec7e93e24faf54b4189894a395129cb8f513aca351e3426ce251ec7cb1"
     },
     {
       "path": "docs/FEATURES.md",
-      "bytes": 43149,
-      "sha256": "0fd5a583fdf15acb791eb875c4d0eecde1120f30a2a19f7882575fceb0981166"
+      "bytes": 47006,
+      "sha256": "a88840d35ef40167b9c68ddbd1bed9eda5f5acf502971da569d7a74880d3b32d"
     },
     {
       "path": "docs/INDEX-FRESHNESS.md",
@@ -108,8 +108,8 @@
     },
     {
       "path": "docs/MIGRATION-1.6.0.md",
-      "bytes": 11528,
-      "sha256": "5e5f923c9fff6e9b519066d77c1f269906029d01108d2664d97575ca20e1b9e2"
+      "bytes": 11701,
+      "sha256": "8d887b5d5c6bc6c03aade16845d69f5476a5e2d52fb4ccea89ebd8e01d5d97e9"
     },
     {
       "path": "docs/OPERATIONS.md",
@@ -128,8 +128,8 @@
     },
     {
       "path": "docs/QUICKSTART.md",
-      "bytes": 9360,
-      "sha256": "1c019b635aed98dc4949d5affe4e95717bef63da752ae6932cfefe96380c6652"
+      "bytes": 9332,
+      "sha256": "d5b3a6c2e5f98d27a3f1db35e874e9e2bf1c638a3014e04f2f576cc542c7328e"
     },
     {
       "path": "docs/RAW-INDEX-POLICY.md",
@@ -138,8 +138,8 @@
     },
     {
       "path": "docs/README.en.md",
-      "bytes": 3979,
-      "sha256": "eeb5631aa332899a2c16f49874aa09f98bdf541bb1789f64d37faa931f6e2f57"
+      "bytes": 3963,
+      "sha256": "832048c2399272e4c3a0783fd30da2671adb2bed49b78bf7b4bed2ba09ef1147"
     },
     {
       "path": "docs/RESIDENT-WATCHER.md",
@@ -158,8 +158,8 @@
     },
     {
       "path": "docs/TROUBLESHOOTING.md",
-      "bytes": 15094,
-      "sha256": "7bfafdedac483515fb2862e8ddd7de11ceda650088f30ca207cb54d3aa417013"
+      "bytes": 15086,
+      "sha256": "400e31241a4f742e9d7aba019343c945ea82e48f5d5e9fbae42e69957bcbbfb3"
     },
     {
       "path": "icon.svg",
@@ -168,8 +168,8 @@
     },
     {
       "path": "lib/client.js",
-      "bytes": 16522,
-      "sha256": "48a6c053572990dc6a060bfe96a34cdd01baeac06a2fcbb85e3c78761a9ecca0"
+      "bytes": 16514,
+      "sha256": "ded54a957ad8838870b35d86d0daec621746649d2ad018c47c8f2178ba8ee94a"
     },
     {
       "path": "locale/en.json",
@@ -183,18 +183,13 @@
     },
     {
       "path": "package.json",
-      "bytes": 4880,
-      "sha256": "8a540ecd88e46c03e41b9cece62b4db5e2330962fc5fef8ecbb387f23c5cf909"
+      "bytes": 4922,
+      "sha256": "1952ec255cfb0d2cf02572dab5009a73e70d8d3031b69ea7a53e7b08ad70556c"
     },
     {
       "path": "runbook.md",
-      "bytes": 18622,
-      "sha256": "3816b757da65565d2f5b4c4815e2eafd7da7a73c1ac73a32bf2797e6663bc234"
-    },
-    {
-      "path": "scripts/acceptance-1.8.11.mjs",
-      "bytes": 65650,
-      "sha256": "9f9ebf2ba2eb66e1911752e01b2e5922883bef4844ebc4b47b57d98424a8347d"
+      "bytes": 18606,
+      "sha256": "e7536a624fb6e7d8fffadefc3fb54479cef64e3d89989fa4eb1225f3d7976021"
     },
     {
       "path": "scripts/archive-digest-build.mjs",
@@ -258,8 +253,8 @@
     },
     {
       "path": "scripts/longlive-doctor.mjs",
-      "bytes": 21363,
-      "sha256": "24190babcfb72167b2fe6484cc8ab3a8529ff9c826fd02c8a5fd7a7e48ad355b"
+      "bytes": 21359,
+      "sha256": "7555f8535965c12906730779f9ba3d4aec32db5175e08bfecc8e779eb0b9c665"
     },
     {
       "path": "scripts/metrics-read.mjs",
@@ -283,13 +278,13 @@
     },
     {
       "path": "scripts/migrate-lifecycle.mjs",
-      "bytes": 5550,
-      "sha256": "bbd754c8c841e74100cb7a7f690220c6b5543abdda39cbaa1e528b7240821744"
+      "bytes": 6183,
+      "sha256": "74ec92caa63886d022fabd6c3c0479f8acaa02fff351d69bb2a808a674587404"
     },
     {
       "path": "scripts/pack.mjs",
-      "bytes": 14550,
-      "sha256": "57ca8a78f6bea08eb12f630ab707c55328e0e34528ec3f6389b80b7e9fd12337"
+      "bytes": 14538,
+      "sha256": "d9cdd7c65b18eaed6802acc9bc518de4c3ef648659730c675c37bcd755cf48f1"
     },
     {
       "path": "scripts/recall-index-build.mjs",
@@ -603,8 +598,8 @@
     },
     {
       "path": "src/deps.js",
-      "bytes": 7144,
-      "sha256": "5a2b42508f7c891761a83df48400fe82f70882a1ff80f3e4177d7e354485355f"
+      "bytes": 7140,
+      "sha256": "49006eb4c26eae1002f9e6c0dc9e208ca638521d777825c1258f97920c6e50ce"
     },
     {
       "path": "src/engine-status.js",
@@ -683,8 +678,8 @@
     },
     {
       "path": "src/index.js",
-      "bytes": 32169,
-      "sha256": "277ea86cd47c4170a7a590de4ba4862e98e3ce09c334576b973eda4cb66fb750"
+      "bytes": 32165,
+      "sha256": "a5d591a3c9f8dcf4c04a23a4f73ec961ead1f219479dc156be567df6d6acb74d"
     },
     {
       "path": "src/lifecycle/gap-clocks.js",
@@ -872,11 +867,6 @@
       "sha256": "940659d7ffab9f8162a2f43426872e0fcc49a11b1f87d77421b90993718c1725"
     },
     {
-      "path": "src/memory/lifecycle-plan.json",
-      "bytes": 15215,
-      "sha256": "2c048531c78b01631d862fd313dc20d965cd876dc00dc523ada8dd4d6cf27a79"
-    },
-    {
       "path": "src/memory/lifecycle.js",
       "bytes": 4369,
       "sha256": "02f3ae7e77cfc5840fac4802d2ddc4c408f66212a393b00954ac4f6247f7274f"
@@ -898,8 +888,8 @@
     },
     {
       "path": "src/memory/migrate-lifecycle.js",
-      "bytes": 75923,
-      "sha256": "c22a0a4387c0add3e53aee784c621e3a6eff1c9bca47b9564301b172c8c43387"
+      "bytes": 76462,
+      "sha256": "c188a49bbcaa6b768d6cb5d82801bb8080621f37173cf0ab20b1cb6aac267945"
     },
     {
       "path": "src/memory/migrate.js",
@@ -1498,8 +1488,8 @@
     },
     {
       "path": "src/ui/flags.js",
-      "bytes": 9052,
-      "sha256": "dc7092474cb88f7d8d79fe39fe5775538974b8fdbeea1c1a4f5bc897f3af71ac"
+      "bytes": 9048,
+      "sha256": "024d4d36c7c1a8ea1754856a565a152474e1a444083c070db957405441377b31"
     },
     {
       "path": "src/ui/panel-api.js",
@@ -1550,6 +1540,11 @@
       "path": "src/version.js",
       "bytes": 3674,
       "sha256": "f09599cf835653de41a5ac5c5779ef35d98605fe4306e1212ad5d0d8b5a52d77"
+    },
+    {
+      "path": "test/fixtures/pre-step-container.mjs",
+      "bytes": 3703,
+      "sha256": "d25a10a2167e8588e2ef48f03cf14642b2a033493521bc78f59187b86f74619a"
     },
     {
       "path": "test/p1_probe.mjs",

@@ -1,7 +1,7 @@
-# @jjh32456/dsh-longlive（久视）
+# @jjh32456/longlive（久视）
 
 > 1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；1.6.4 起发布名改为 scoped 包
-> `@jjh32456/dsh-longlive`（npm 包名），显示名仍是「久视」（英文 Longlive）；
+> `@jjh32456/dsh-longlive`（npm 包名；2026-11-27 起改为 `@jjh32456/longlive`），显示名仍是「久视」（英文 Longlive）；
 > 1.6.3 在 1.6.0 基线上新增**热截断**（cut-only 压缩引擎，见下文「版本与边界」），这一项是 1.5.0
 > 没有的能力；1.6.4 把热截断默认值收到 **350K 策略触发 / 保留 4 轮**，并修复 D6 重启后首轮冻结
 > （G3）与可移植性收口。升级步骤见 [docs/MIGRATION-1.6.0.md](docs/MIGRATION-1.6.0.md)。
@@ -50,6 +50,31 @@ longlive 的做法，是把「我」从会话里搬出来，做成一个**共享
 ### 3. 会话文件越来越大
 
 每个会话是一个 `session.v4.jsonl.zstd` 日志，平时只追加、不会自己缩小。压缩过的旧事件仍占着磁盘。插件负责体检、备份、按规则回收，而不是让你手动删文件。
+
+## 1.8.11 / 1.8.12 新功能：记忆网络 + 蒸馏 + 隐私修复
+
+**记忆网络（1.8.11）**：记忆卡之间可以有「关系边」了——supersedes / superseded_by /
+deprecated_by / conflicts_with / answers_with / derived_from / mentions / same_topic 八类，
+每条边带 evidence（出处行、逐字 quote、confidence）。召回时除文本命中，还会沿 1-hop 边扩展
+（按 deprecated_by > conflicts_with > superseded_by > answers_with 优先级），把「旧卡被谁取代」
+「这张卡和哪张冲突」直接带进注入，并标出来源边；坏边/坏引用只计数、不挡召回。
+边表由 `scripts/edges-build.mjs` 从 `links.jsonl` + 卡面 wikilink + 迁移计划构建（幂等、原子写、
+`--dry-run` 只预览），存放在 `<memoryRoot>/.longlive/recall/edges.jsonl`。没有这个文件时召回照常，
+只是没有关系扩展。
+
+**蒸馏：卡生命周期（1.8.11）**：卡的前言可写独立字段 `lifecycle: canonical` 或 `historical`
+（不碰原来的 `status`）。`historical` 卡默认不进注入；只有你明确问「以前 / 旧版 / 之前」这类历史
+问题时才放行，并标「历史口径」；`canonical` 在排序里排最前。`memory_recall` 工具检索层对
+historical 卡降权 ×0.3（显式历史查询不降权），但检索层仍能搜到它们。迁移工具
+`scripts/migrate-lifecycle.mjs` 提供 `--mode plan|dry-run|apply|rollback`：apply 一次性快照原文、
+按 apply 前行号替换、校验失败自动还原，rollback 逐字节恢复。
+
+**隐私修复（1.8.12）**：npm 包里不再包含 `lifecycle-plan.json`（真实记忆内容）与验收脚本
+`acceptance-1.8.11.mjs`；迁移计划改由你在仓库内提供，或用 `--plan` 显式传入，或把计划放到
+`<memoryRoot>/.longlive/lifecycle-plan.json`。迁移 CLI 找不到计划时会报 `E_PLAN_MISSING` 并给出
+指引，不会静默跑空。
+
+细节、边界与回滚见 [docs/FEATURES.md](docs/FEATURES.md) 与 [docs/MIGRATION-1.6.0.md](docs/MIGRATION-1.6.0.md)。
 
 ## 自动截断：会话长了怎么办
 
@@ -101,13 +126,13 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ```powershell
 # 1. 安装本地 tgz（用 plugin add，不要用 npm install）
-& $DSH plugin --profile desktop add "file:<path>/jjh32456-dsh-longlive-1.8.10.tgz"
+& $DSH plugin --profile desktop add "file:<path>/jjh32456-longlive-1.8.12.tgz"
 
 # 2. 确认版本
 & $DSH plugin --profile desktop list --depth 0
 
 # 3. 自检（只读，不改任何东西；设过 DSH_HOME 就把前半段换成 $env:DSH_HOME）
-& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\dsh-longlive\scripts\longlive-doctor.mjs" --profile desktop
+& $NODE "$env:USERPROFILE\.dsh\profiles\desktop\node_modules\@jjh32456\longlive\scripts\longlive-doctor.mjs" --profile desktop
 ```
 
 上面的命令统一用 `& $DSH` 调用（`$DSH` 就是上面设的 `dsh.cmd` 路径）；若 `dsh` 已在 PATH，也可以直接写 `dsh`。
@@ -156,8 +181,8 @@ $NODE = '<DSH 安装目录>\resources\runtime\primary-runtime\dependencies\node\
 
 ## 版本与边界
 
-- 本套文档对应 **1.8.11** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
-  1.6.4 起发布名改为 scoped 包 `@jjh32456/dsh-longlive`）。
+- 本套文档对应 **1.8.12** 的本地 tgz（1.6.0 起包名由 `dsh-session-longlive` 改为 `dsh-longlive`；
+  1.6.4 起为 `@jjh32456/dsh-longlive`；1.8.12 起为 `@jjh32456/longlive`）。
   **1.8.0 变更**：有据才答注入修复 + 来源闸（默认关闭的信心闸、证据投递修复，见
   [docs/ANSWER-GUARD.md](docs/ANSWER-GUARD.md)）、共享大脑 thinking（默认开启，仅摘要）、
   身份默认中性（[docs/PRIVACY.md](docs/PRIVACY.md)）、可移植加固（node 走 `process.execPath`、

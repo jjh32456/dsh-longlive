@@ -1,4 +1,4 @@
-# @jjh32456/dsh-longlive 操作手册（runbook）
+# @jjh32456/longlive 操作手册（runbook）
 
 > 目标：把一个**正在变胖但已经停下来**的会话日志安全变短，并且让「任何一步失败都退回原样」可验证、可操作。
 > 插件只在文件层工作；**不会**修改对话内容，**不会**自动触发，**不会**删除任何备份。
@@ -103,9 +103,9 @@ T7 需要 `DSH_EXE` 与 `DSH_CLI_JS` 指向真实宿主（见 `test/t7_drive.mjs
 写成可检查的清单。执行者：**lead 本人**（或 lead 明确授权的脚本），不是后台代理。
 
 1. **谁在替换前停宿主**：由 lead 本人在场确认，按 runbook 停宿主（先退 DSH，进程不在运行时
-   才允许替换 `node_modules/@jjh32456/dsh-longlive`）；替换前把窗口和停/起责任写进发布记录。
-2. **回滚资产同时存在**：`jjh32456-dsh-longlive-1.8.5.tgz` 与
-   `node_modules/@jjh32456/dsh-longlive.old-<ts>` **同时存在**才允许继续。缺任一项 → 停住，
+   才允许替换 `node_modules/@jjh32456/longlive`）；替换前把窗口和停/起责任写进发布记录。
+2. **回滚资产同时存在**：`jjh32456-longlive-1.8.5.tgz` 与
+   `node_modules/@jjh32456/longlive.old-<ts>` **同时存在**才允许继续。缺任一项 → 停住，
    不进入替换。
 3. **回滚演练一次**：在 VM / 测试 profile 用 1.8.5 tgz 换回，验证版本号、工具面、面板完整性、
    记忆根卡数，演练结果写进发布记录（`_publish-1.8.6/release-assets/PUBLISH-1.8.6.md`）。
