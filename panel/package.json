@@ -1,7 +1,7 @@
 {
   "name": "@jjh32456/dsh-longlive-panel",
-  "version": "1.8.1",
-  "description": "久视（longlive）共享大脑面板 1.8.1：七页签只读 + 记忆/回忆/遗忘三板块只读展示；经长活 M2-G 的受控判定动作（18 动作，能力令牌在宿主内存，不落盘）；summary 新增可选 autoProcedure 只读块（默认关闭、零 staging IO）。",
+  "version": "1.8.2",
+  "description": "久视（longlive）共享大脑面板 1.8.2：七页签只读 + 记忆/回忆/遗忘三板块只读展示；1.8.2 修复 longlive 1.8.12 改名后的包名兜底（v2 面不再脱钩），并把 1.8.7–1.8.12 新功能上屏：记忆网络（edges）、蒸馏（canonical/historical + 迁移记录）、强制召回/链路学习/归档兜底、24h 活动窗、自动截断新阈值口径。经长活 M2-G 的受控判定动作（18 动作，能力令牌在宿主内存，不落盘）。",
   "type": "module",
   "main": "src/server.js",
   "files": [
@@ -54,10 +54,10 @@
     "smoke:clean-env": "node clean-env-smoke.mjs"
   },
   "peerDependencies": {
-    "@jjh32456/dsh-longlive": "^1.8.0"
+    "@jjh32456/longlive": "^1.8.12"
   },
   "peerDependenciesMeta": {
-    "@jjh32456/dsh-longlive": {
+    "@jjh32456/longlive": {
       "optional": false
     }
   }

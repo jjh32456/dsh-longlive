@@ -11,6 +11,8 @@
  *   - main：整页面板 = 旧 7 页签（六层视图 / 过滤器决策 / 影子记录 / 常驻 Router / 本轮想起 / 截断记录 / 使用说明）
  *     + 1.6.9 三板块（记忆 / 回忆 / 遗忘）
  *     + 1.8.0 全视图（断言-证据 / 冲突 / 审计 / 角色；内嵌 claims+evidence 版本链、信任分/Bank、帧栈）
+ *     + 1.8.2 网络 / 蒸馏（longlive 1.8.8 links + 1.8.11 edges/lifecycle/迁移），并在
+ *       六层视图/本轮想起/截断记录三页追加 24h 活动窗、强制召回与链路、自动截断口径
  *     （三板块与 1.8.0 视图不拿 SAMPLE 顶班，未接通就显示未实装/空态）
  *
  * 数据：旧页签走 /api/longlive-panel/*（只读）；三板块走 /api/longlive-panel/v2/*。
@@ -56,6 +58,8 @@ window.__ModuleLoader__.load({
       { id: 'shadow', label: '影子记录', unit: '条' },
       { id: 'router', label: '常驻 Router', unit: '条' },
       { id: 'recall', label: '本轮想起', unit: '轮' },
+      { id: 'network', label: '网络', unit: '边' },
+      { id: 'distill', label: '蒸馏', unit: '卡' },
       { id: 'trunc', label: '截断记录', unit: '次' },
       { id: 'help', label: '使用说明', unit: '' },
     ]
@@ -422,6 +426,37 @@ window.__ModuleLoader__.load({
       return s.replace(/^session-/, '').slice(0, 12)
     }
 
+    // 1.8.2（红队 rt-panel-ui P1/P2 复现修复）：UI 层兜底脱敏与脏数组防护。
+    // 数据层（extras/server）已经脱敏；这里再挡一道「换源/字段旁路」——
+    // 任何绝对路径（盘符 / UNC / home）都压成 [path]，会话只显示短 id，
+    // 数组里混进 null/非对象元素时跳过，不让一个坏行把整页打崩。
+    function maskClientPath(value) {
+      let s = asText(value)
+      if (!s) return '—'
+      s = s.replace(/[A-Za-z]:[\\/][^\s"'，。；、）)\]]*/g, '[path]')
+      s = s.replace(/\\\\[^\s"'，。；、）)\]]+/g, '[path]')
+      s = s.replace(/\/(?:home|Users|root|opt|var|mnt)\/[^\s"'，。；、）)\]]*/g, '[path]')
+      // 完整会话 id 也不上屏：session-xxxxxxxx-… 与裸 UUID 都压成短 id。
+      s = s.replace(/session-[A-Za-z0-9-]{8,}/g, (m) => {
+        const rest = m.slice('session-'.length)
+        return rest.length > 12 ? `session-${rest.slice(0, 12)}…` : m
+      })
+      s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, (m) => `${m.slice(0, 8)}…`)
+      return s
+    }
+
+    // 页头只显示记忆库目录名（如 …/longlive-memory），不显示盘符/用户名绝对路径。
+    function maskRootPath(value) {
+      const s = asText(value)
+      if (!s) return ''
+      const m = /[\\/]([^\\/]+)[\\/]?$/.exec(s)
+      return m ? `…/${m[1]}` : s
+    }
+
+    function objectsOf(value) {
+      return Array.isArray(value) ? value.filter((x) => x && typeof x === 'object') : []
+    }
+
     // ------------------------------------------------------------------
     // 样式（只用宿主 token）
     //
@@ -584,13 +619,13 @@ window.__ModuleLoader__.load({
     }
 
     function LayerGrid({ layers }) {
-      const cards = (layers || []).map((l) => h('div', { className: 'card', key: l.id }, [
+      const cards = objectsOf(layers).map((l) => h('div', { className: 'card', key: l.id }, [
         h('div', { className: 'top', key: 'top' }, [
           h('span', { className: 'no', key: 'no' }, `L${l.index}`),
           h(HealthDot, { health: l.health, key: 'dot' }),
         ]),
         h('h3', { key: 'name' }, l.name),
-        h('div', { className: 'path', key: 'path' }, l.path),
+        h('div', { className: 'path', key: 'path' }, maskClientPath(l.path)),
         h('div', { className: 'count', key: 'count' }, [String(l.count ?? 0), h('small', { key: 'u' }, l.unit || '')]),
         h('div', { className: 'note', key: 'note' }, l.note || ''),
       ]))
@@ -640,9 +675,19 @@ window.__ModuleLoader__.load({
       ])
     }
 
-    function PalaceTab({ summary, source }) {
+    function PalaceTab({ summary, source, extras }) {
       const badge = h('span', { className: `chip ${source === 'live' ? 'solid' : 'sample'}` }, source === 'live' ? '实时' : '样例')
-      const warnings = (summary.warnings || []).map((w) => h('span', { key: w.code, className: 'chip warn' }, w.code))
+      const act = extras && extras.present ? extras : null
+      const actMetrics = act ? [
+        ['近 24h 活动行', act.rows24h],
+        ['活跃会话', act.activeSessions24h],
+        ['总行数', act.rows],
+        ['旧行归档', act.archivedFiles ? act.archivedFiles.length : 0],
+        ['归档体积', fmtBytes(act.archivedBytes)],
+        ['最早行', fmtTime(act.oldestAt)],
+        ['最新行', fmtTime(act.newestAt)],
+      ] : []
+      const warnings = objectsOf(summary.warnings).map((w) => h('span', { key: w.code, className: 'chip warn' }, maskClientPath(w.code)))
       // 先排好序再分两组：活动行直接展开，已归档行收进折叠，别让历史把当下挤下去。
       const liveRows = sortLiveRows(summary.live)
       const activeRows = liveRows.filter((r) => r && r.state !== 'dead')
@@ -659,6 +704,28 @@ window.__ModuleLoader__.load({
             ? h(ArchivedFold, { rows: archivedRows, key: 'archived' })
             : null,
         ]),
+        h('section', { className: 'section', key: 'activity' }, [
+          h('h2', null, [
+            '活动窗（近 24h）',
+            h('span', { className: 'chip', key: 'v' }, '1.8.8'),
+            h('span', { className: 'chip mute', key: 'win' }, '时间窗口径：先按 24h 再按行数护栏'),
+          ]),
+          act
+            ? h('div', { key: 'body' }, [
+              h('div', { className: 'metrics', key: 'm' }, actMetrics.map(([label, value], i) => h('div', { className: 'metric', key: `m-${i}` }, [
+                h('b', { key: 'v' }, asText(value) == null ? '—' : asText(value)),
+                h('span', { key: 'l' }, label),
+              ]))),
+              act.byKind && Object.keys(act.byKind).length
+                ? h('div', { className: 'row', key: 'kinds' }, Object.keys(act.byKind).sort().map((k) => h('span', { className: 'chip', key: k }, `${maskClientPath(k)} ${act.byKind[k]}`)))
+                : null,
+              objectsOf(act.archivedFiles).length
+                ? h('div', { className: 'note', key: 'arch' }, objectsOf(act.archivedFiles).map((f) => `${maskClientPath(f.name)}（${fmtBytes(f.sizeBytes)}）`).join(' · '))
+                : null,
+              act.badLines ? h('div', { className: 'note', key: 'bad' }, `${act.badLines} 行活动记录解析失败，已跳过。`) : null,
+            ])
+            : h('div', { className: 'empty', key: 'empty' }, '没有读到 .longlive/board/activity.jsonl（活动板未开启或还没有活动）。'),
+        ]),
         h('div', { className: 'foot', key: 'foot' }, [
           h('span', { key: 'g' }, `刷新于 ${fmtTime(summary.generatedAt)}`),
           summary.freshness && summary.freshness.indexBuiltAt
@@ -669,10 +736,21 @@ window.__ModuleLoader__.load({
       ])
     }
 
-    function TruncTab({ trunc, source }) {
-      const items = trunc.items || []
-      const backups = trunc.backups || []
+    function TruncTab({ trunc, source, extras }) {
+      const items = objectsOf(trunc.items)
+      const backups = objectsOf(trunc.backups)
       const badge = h('span', { className: `chip ${source === 'live' ? 'solid' : 'sample'}` }, source === 'live' ? '实时' : '样例')
+      const auto = extras && extras.present ? extras : null
+      const autoMetrics = auto ? [
+        ['模式', auto.mode || '—'],
+        ['开关', auto.enabled ? 'enabled' : 'disabled'],
+        ['外部日志阈值', auto.thresholds && auto.thresholds.tokensThreshold != null ? `${Number(auto.thresholds.tokensThreshold).toLocaleString('en-US')} tokens` : '—'],
+        ['保留轮数 keepTurns', auto.thresholds ? auto.thresholds.keepTurns : '—'],
+        ['保留 token keepTokens', auto.thresholds ? Number(auto.thresholds.keepTokens).toLocaleString('en-US') : '—'],
+        ['评估次数', auto.counters ? auto.counters.evaluations : '—'],
+        ['超阈会话', auto.counters ? auto.counters.over : '—'],
+        ['不可切 infeasible', auto.counters ? auto.counters.infeasible : '—'],
+      ] : []
 
       const truncRows = items.map((t) => h('tr', { key: t.id }, [
         h('td', { className: 'num', key: 'at' }, [
@@ -689,9 +767,9 @@ window.__ModuleLoader__.load({
           ? `${t.beforeMessages ?? '—'} → ${t.afterMessages ?? '—'} 条消息`
           : `${t.beforeEvents ?? '—'} → ${t.afterEvents ?? '—'}`),
         h('td', { key: 'backup' }, [
-          h('div', { className: 'mono snippet', key: 'f' }, t.backup || '—'),
+          h('div', { className: 'mono snippet', key: 'f' }, t.backup ? maskClientPath(String(t.backup).split(/[\\/]/).pop()) : '—'),
           t.backupSha256 ? h('div', { className: 'snippet mono', key: 'h' }, shortSha(t.backupSha256)) : null,
-          t.kind === 'visible' && t.archive ? h('div', { className: 'snippet mono', key: 'a' }, `归档 ${t.archive}`) : null,
+          t.kind === 'visible' && t.archive ? h('div', { className: 'snippet mono', key: 'a' }, `归档 ${maskClientPath(t.archive)}`) : null,
         ]),
       ]))
       const truncTable = items.length
@@ -699,7 +777,7 @@ window.__ModuleLoader__.load({
         : h('div', { className: 'empty' }, '没有截断记录（truncate.json / truncate-visible.json 不存在或为空）')
 
       const backupRows = backups.map((b) => h('tr', { key: `${b.sessionId}/${b.file}` }, [
-        h('td', { className: 'mono', key: 'file' }, b.file || '—'),
+        h('td', { className: 'mono', key: 'file' }, maskClientPath(b.file)),
         h('td', { className: 'num', key: 'size' }, fmtBytes(b.size)),
         h('td', { className: 'num', key: 'at' }, fmtTime(b.createdAt)),
         h('td', { key: 'exists' }, h('span', { className: `chip ${b.exists === false ? 'warn' : 'ok'}` }, b.exists === false ? '缺失' : '存在')),
@@ -713,6 +791,50 @@ window.__ModuleLoader__.load({
         h('section', { className: 'section', key: 'trunc' }, [
           h('h2', null, ['截断记录', badge, h('span', { className: 'chip', key: 'c' }, `扫了 ${trunc.sessionsScanned ?? '—'} 个会话目录`)]),
           truncTable,
+        ]),
+        h('section', { className: 'section', key: 'auto' }, [
+          h('h2', null, [
+            '自动截断口径',
+            h('span', { className: 'chip', key: 'v' }, '1.8.10'),
+            h('span', { className: 'chip mute', key: 'file' }, '.longlive/auto-truncate-status.json'),
+          ]),
+          auto
+            ? h('div', { key: 'body' }, [
+              h('div', { className: 'metrics', key: 'm' }, autoMetrics.map(([label, value], i) => h('div', { className: 'metric', key: `am-${i}` }, [
+                h('b', { key: 'v' }, asText(value) == null ? '—' : asText(value)),
+                h('span', { key: 'l' }, label),
+              ]))),
+              h('div', { className: 'note', key: 'why' }, '外部日志阈值与模型上下文线（350k）已解耦：12M tokens ≈ 60MB 会话日志；默认 dryrun 只评估不写请求。'),
+              auto.over && objectsOf(auto.over.sessions).length
+                ? h('div', { key: 'sessions' }, [
+                  h('h3', { key: 't' }, `超阈会话（${auto.over.count ?? objectsOf(auto.over.sessions).length}）`),
+                  h('table', { key: 'tbl' }, [
+                    TH(['会话', 'tokens', '轮次', '最近评估']),
+                    h('tbody', null, objectsOf(auto.over.sessions).map((s, i) => h('tr', { key: `os-${i}` }, [
+                      h('td', { className: 'mono', key: 's' }, maskClientPath(s.session)),
+                      h('td', { className: 'num', key: 't' }, s.tokens == null ? '—' : Number(s.tokens).toLocaleString('en-US')),
+                      h('td', { className: 'num', key: 'n' }, s.turns == null ? '—' : String(s.turns)),
+                      h('td', { className: 'num', key: 'a' }, fmtTime(s.at)),
+                    ]))),
+                  ]),
+                ])
+                : null,
+              auto.lastInfeasible
+                ? h('div', { className: 'alert warn', key: 'infeasible' }, [
+                  h('div', { className: 't', key: 't' }, '最近一次不可切'),
+                  h('div', { className: 'd', key: 'd' }, `${auto.lastInfeasible.code || '—'} · ${auto.lastInfeasible.reason || '没有给原因'}`),
+                  h('div', { className: 'snippet mono', key: 'm' }, `${auto.lastInfeasible.session || '—'} · ${fmtTime(auto.lastInfeasible.at)}`),
+                ])
+                : null,
+              auto.lastError
+                ? h('div', { className: 'alert bad', key: 'err' }, [
+                  h('div', { className: 't', key: 't' }, '最近一次评估错误'),
+                  h('div', { className: 'd', key: 'd' }, `${auto.lastError.code || '—'} · ${auto.lastError.message || '—'}`),
+                  h('div', { className: 'snippet mono', key: 'm' }, `${auto.lastError.session || '—'} · ${fmtTime(auto.lastError.at)}`),
+                ])
+                : null,
+            ])
+            : h('div', { className: 'empty', key: 'empty' }, '没读到自动截断状态（未开启或还没有评估记录）。'),
         ]),
         h('section', { className: 'section', key: 'backups' }, [
           h('h2', null, ['备份', h('span', { className: 'chip', key: 'c' }, `${backups.length} 个`)]),
@@ -1015,10 +1137,10 @@ window.__ModuleLoader__.load({
       // warnings：开放枚举的码。已知码给中文文案，未知码原样显示并标「未收录」；
       // 条数就是 warnings.length（DESIGN §6.5），不白名单过滤、不丢弃。
       const warningRow = (w, i, srcKey) => {
-        const code = asText(w && w.code) || `W-${i}`
+        const code = maskClientPath(asText(w && w.code)) || `W-${i}`
         const known = w && w.known === true
-        return h('div', { className: 'row', key: `${srcKey}-${code}-${i}`, title: asText(w && w.detail) || undefined }, [
-          h('span', { className: `chip ${known ? 'warn' : 'mute'}`, key: 'label' }, known ? (asText(w.label) || code) : code),
+        return h('div', { className: 'row', key: `${srcKey}-${code}-${i}`, title: w && w.detail ? maskClientPath(w.detail) : undefined }, [
+          h('span', { className: `chip ${known ? 'warn' : 'mute'}`, key: 'label' }, known ? (maskClientPath(asText(w.label)) || code) : code),
           known ? h('span', { className: 's mono', key: 'code' }, code) : h('span', { className: 'chip bad', key: 'unknown' }, '未收录'),
         ])
       }
@@ -1195,7 +1317,7 @@ window.__ModuleLoader__.load({
     // 空态，不崩；这一页不用 SAMPLE 顶班——召回记录的真假不能拿样例冒充。
     // ------------------------------------------------------------------
 
-    function RecallTab({ recall, source, error, loading }) {
+    function RecallTab({ recall, source, error, loading, extras }) {
       const data = recall || {}
       const items = Array.isArray(data.items) ? data.items : []
       const metrics = data.metrics && typeof data.metrics === 'object' ? data.metrics : {}
@@ -1203,6 +1325,14 @@ window.__ModuleLoader__.load({
       const live = source === 'live'
       const present = live && data.present !== false
       const parseErrors = Number(data.parseErrors) || 0
+      const forced = extras && extras.present ? extras : null
+      const forcedMetrics = forced ? [
+        ['强制召回轮数', forced.counts ? forced.counts.forced : null],
+        ['link 命中注入', forced.link ? forced.link.injected : null],
+        ['link tokens', forced.link && forced.link.tokens != null ? Number(forced.link.tokens).toLocaleString('en-US') : null],
+        ['归档兜底命中', forced.archive ? forced.archive.hits : null],
+        ['日志扫了', forced.scanned],
+      ] : []
 
       const metric = (value, label, key) => h('div', { className: 'metric', key }, [
         h('b', { key: 'v' }, asText(value) == null ? '—' : asText(value)),
@@ -1240,7 +1370,7 @@ window.__ModuleLoader__.load({
         const base = asText(row && row.at) || `row-${i}`
         const turnLabel = row && row.turn != null ? `第 ${asText(row.turn)} 轮` : '轮次未记'
         const when = fmtTime(row && row.at)
-        const sid = asText(row && row.sessionId) || '—'
+        const sid = shortSession(row && row.sessionId)
         const injected = row && Array.isArray(row.injected) ? row.injected : []
         const blocked = row && Array.isArray(row.blocked) ? row.blocked : []
         const ctx = { turnLabel, when, sid }
@@ -1308,6 +1438,49 @@ window.__ModuleLoader__.load({
             ])
             : null,
         ]),
+        h('section', { className: 'section', key: 'forced' }, [
+          h('h2', null, [
+            '强制召回与链路',
+            h('span', { className: 'chip', key: 'v' }, '1.8.8'),
+            h('span', { className: 'chip mute', key: 'src' }, '.longlive/recall-log.jsonl（尾部）'),
+          ]),
+          forced
+            ? h('div', { key: 'body' }, [
+              h('div', { className: 'metrics', key: 'm' }, forcedMetrics.map(([label, value], i) => h('div', { className: 'metric', key: `fm-${i}` }, [
+                h('b', { key: 'v' }, asText(value) == null ? '—' : asText(value)),
+                h('span', { key: 'l' }, label),
+              ]))),
+              h('div', { className: 'row', key: 'srcs' }, [
+                h('span', { className: 'chip', key: 'lbl' }, '注入来源'),
+                h('span', { className: 'chip solid', key: 'link' }, `link ${forced.sources ? forced.sources.link : 0}`),
+                h('span', { className: 'chip', key: 'file' }, `file ${forced.sources ? forced.sources.file : 0}`),
+                h('span', { className: 'chip', key: 'archive' }, `archive ${forced.sources ? forced.sources.archive : 0}`),
+                forced.counts && forced.counts.archiveUnavailable
+                  ? h('span', { className: 'chip warn', key: 'unavail' }, `归档不可用 ${forced.counts.archiveUnavailable}`)
+                  : null,
+              ]),
+              objectsOf(forced.recentForced).length
+                ? h('div', { key: 'recent' }, [
+                  h('h3', { key: 't' }, '最近的强制召回'),
+                  h('table', { key: 'tbl' }, [
+                    TH(['时间', '会话', '轮', '触发', '结果', '命中', 'link 词', 'token']),
+                    h('tbody', null, objectsOf(forced.recentForced).map((r, i) => h('tr', { key: `rf-${i}` }, [
+                      h('td', { className: 'num', key: 'a' }, fmtTime(r.at)),
+                      h('td', { className: 'mono', key: 's' }, maskClientPath(r.session)),
+                      h('td', { className: 'num', key: 'n' }, r.turn == null ? '—' : String(r.turn)),
+                      h('td', { key: 'w' }, h('span', { className: 'chip', key: 't' }, r.trigger || '—')),
+                      h('td', { key: 'o' }, h('span', { className: `chip ${r.outcome === 'injected' ? 'solid' : (r.error ? 'bad' : 'mute')}`, key: 'x' }, r.outcome || '—')),
+                      h('td', { className: 'num', key: 'c' }, r.injectedCount == null ? '—' : String(r.injectedCount)),
+                      h('td', { className: 'snippet', key: 'm' }, Array.isArray(r.matchedTerms) && r.matchedTerms.length ? r.matchedTerms.map((t) => maskClientPath(asText(t))).filter(Boolean).join(' / ') || '—' : '—'),
+                      h('td', { className: 'num', key: 'k' }, r.estimatedTokens == null ? '—' : Number(r.estimatedTokens).toLocaleString('en-US')),
+                    ]))),
+                  ]),
+                ])
+                : h('div', { className: 'empty', key: 'no-forced' }, '日志里还没有 forced 记录（或日志还没写入）。'),
+              forced.badLines ? h('div', { className: 'note', key: 'bad' }, `${forced.badLines} 行召回日志解析失败，已跳过。`) : null,
+            ])
+            : h('div', { className: 'empty', key: 'empty' }, '没读到强制召回统计（.longlive/recall-log.jsonl 不存在或为空）。'),
+        ]),
         h('section', { className: 'section', key: 'items' }, [
           h('h2', null, [
             '召回流水',
@@ -1331,6 +1504,183 @@ window.__ModuleLoader__.load({
     }
 
     // ------------------------------------------------------------------
+    // 网络（1.8.8 链路 + 1.8.11 edges）与 蒸馏（1.8.11 lifecycle/迁移）
+    // 只读：数据来自 /api/longlive-panel/network 与 /distill；
+    // 文件缺失只显示空态，不拿样例顶班。
+    // ------------------------------------------------------------------
+
+    function NetworkTab({ network, source, error, loading }) {
+      const data = network || {}
+      const edges = data.edges && typeof data.edges === 'object' ? data.edges : {}
+      const links = data.links && typeof data.links === 'object' ? data.links : {}
+      const audit = data.audit && typeof data.audit === 'object' ? data.audit : {}
+      const live = source === 'live'
+      const [typeFilter, setTypeFilter] = useState('')
+      const edgeItems = objectsOf(edges.items)
+      const shown = typeFilter ? edgeItems.filter((e) => e.type === typeFilter) : edgeItems
+      const byType = edges.byType && typeof edges.byType === 'object' ? edges.byType : {}
+      const types = Object.keys(byType).sort((a, b) => byType[b] - byType[a] || a.localeCompare(b))
+      const metric = (value, label, key) => h('div', { className: 'metric', key }, [
+        h('b', { key: 'v' }, asText(value) == null ? '—' : asText(value)),
+        h('span', { key: 'l' }, label),
+      ])
+      const edgeRows = shown.map((e, i) => h('tr', { key: `${asText(e.from)}->${asText(e.to)}:${i}` }, [
+        h('td', { key: 'f' }, h('div', { className: 'mono path', key: 'p' }, maskClientPath(e.from))),
+        h('td', { key: 't' }, h('div', { className: 'mono path', key: 'p' }, maskClientPath(e.to))),
+        h('td', { key: 'ty' }, h('span', { className: 'chip', key: 'c' }, maskClientPath(e.type))),
+        h('td', { className: 'num', key: 'cf' }, e.confidence == null ? '—' : String(e.confidence)),
+        h('td', { key: 'q' }, h('div', { className: 'snippet', key: 's' }, maskClientPath(e.quote))),
+        h('td', { className: 'num', key: 'cr' }, fmtTime(e.createdAt)),
+      ]))
+      const nodeRows = objectsOf(edges.topNodes).map((n, i) => h('tr', { key: `n-${i}` }, [
+        h('td', { key: 'p' }, h('div', { className: 'mono path' }, maskClientPath(n.path))),
+        h('td', { className: 'num', key: 'd' }, n.degree == null ? '—' : String(n.degree)),
+      ]))
+      const termRows = objectsOf(links.topTerms).map((t, i) => h('tr', { key: `t-${i}` }, [
+        h('td', { key: 't' }, maskClientPath(t.term)),
+        h('td', { className: 'num', key: 'c' }, t.cards == null ? '—' : String(t.cards)),
+        h('td', { className: 'num', key: 'w' }, t.weightSum == null ? '—' : String(t.weightSum)),
+      ]))
+      const learnedRows = objectsOf(links.recentLearned).map((t, i) => h('tr', { key: `l-${i}` }, [
+        h('td', { key: 't' }, maskClientPath(t.term)),
+        h('td', { key: 'p' }, h('div', { className: 'mono path' }, maskClientPath(t.cardPath))),
+        h('td', { className: 'num', key: 'w' }, t.weight == null ? '—' : String(t.weight)),
+        h('td', { className: 'num', key: 'u' }, fmtTime(t.updatedAt)),
+      ]))
+      const auditRows = objectsOf(audit.items).map((a, i) => h('tr', { key: `a-${i}` }, [
+        h('td', { className: 'num', key: 'at' }, fmtTime(a.at)),
+        h('td', { key: 'ac' }, maskClientPath(a.action)),
+        h('td', { key: 'fb' }, maskClientPath(a.feedback)),
+        h('td', { className: 'num', key: 'c' }, a.changeCount == null ? '—' : String(a.changeCount)),
+        h('td', { key: 'tm' }, Array.isArray(a.terms) ? a.terms.map((t) => asText(t)).filter(Boolean).map((t) => maskClientPath(t)).join(' / ') || '—' : '—'),
+      ]))
+      return h(React.Fragment, null, [
+        !live && !loading ? h('div', { className: 'notice', key: 'notice' }, '网络接口未接通：这一页没有样例数据，不会拿假边冒充记忆网络。') : null,
+        h('section', { className: 'section', key: 'head' }, [
+          h('h2', null, ['网络（记忆边）', h('span', { className: `chip ${live ? 'solid' : 'sample'}`, key: 'tag' }, live ? '实时' : (loading ? '读取中' : '未接通'))]),
+          h('div', { className: 'row', key: 'files' }, [
+            h('span', { className: 'chip mono', key: 'e' }, '.longlive/recall/edges.jsonl'),
+            h('span', { className: 'chip mono', key: 'l' }, '.longlive/recall/links.jsonl'),
+          ]),
+          h('div', { className: 'metrics', key: 'm' }, [
+            metric(edges.total ?? 0, '边总数', 'edges'),
+            metric(edges.nodes ?? 0, '节点', 'nodes'),
+            metric(links.total ?? 0, '链路（词→卡）', 'links'),
+            metric(links.terms ?? 0, '词', 'terms'),
+            metric(links.cards ?? 0, '卡', 'cards'),
+            metric(links.learned ?? 0, 'learned 边', 'learned'),
+          ]),
+          edges.badLines ? h('div', { className: 'note', key: 'bad' }, `${edges.badLines} 行边记录解析失败，已跳过。`) : null,
+        ]),
+        h('section', { className: 'section', key: 'types' }, [
+          h('h2', null, ['边类型分布', h('span', { className: 'chip mute', key: 'n' }, '1.8.11：8 类关系边')]),
+          h('div', { className: 'row', key: 'chips' }, [
+            h('button', { key: 'all', type: 'button', className: `chip ${typeFilter ? '' : 'solid'}`, onClick: () => setTypeFilter('') }, `全部 ${edges.total ?? 0}`),
+            ...types.map((t) => h('button', { key: t, type: 'button', className: `chip ${typeFilter === t ? 'solid' : ''}`, onClick: () => setTypeFilter(typeFilter === t ? '' : t) }, `${t} ${byType[t]}`)),
+          ]),
+          shown.length
+            ? h('table', null, [TH(['从', '到', '类型', '置信度', '证据引文', '建立时间']), h('tbody', null, edgeRows)])
+            : h('div', { className: 'empty' }, live ? '没有边记录（.longlive/recall/edges.jsonl 为空或构建脚本还没跑过）。' : '边接口未接通。'),
+        ]),
+        h('section', { className: 'section', key: 'nodes' }, [
+          h('h2', null, ['连接最多的节点', h('span', { className: 'chip', key: 'n' }, `Top ${nodeRows.length}`)]),
+          nodeRows.length ? h('table', null, [TH(['卡路径', '度数']), h('tbody', null, nodeRows)]) : h('div', { className: 'empty' }, '没有节点'),
+        ]),
+        h('section', { className: 'section', key: 'terms' }, [
+          h('h2', null, ['学习链路（词 → 卡）', h('span', { className: 'chip mute', key: 'v' }, '1.8.8：seed/learned')]),
+          h('div', { className: 'row', key: 'srcs' }, [
+            h('span', { className: 'chip', key: 'lbl' }, '来源'),
+            h('span', { className: 'chip solid', key: 'seed' }, `seed ${links.bySource ? links.bySource.seed || 0 : 0}`),
+            h('span', { className: 'chip', key: 'learned' }, `learned ${links.bySource ? links.bySource.learned || 0 : 0}`),
+          ]),
+          termRows.length ? h('table', null, [TH(['词', '卡数', '权重和']), h('tbody', null, termRows)]) : h('div', { className: 'empty' }, '没有链路记录'),
+          learnedRows.length
+            ? h('div', { key: 'learned' }, [
+              h('h3', { key: 't' }, '最近学习到的边'),
+              h('table', { key: 'tbl' }, [TH(['词', '卡路径', '权重', '更新时间']), h('tbody', null, learnedRows)]),
+            ])
+            : null,
+          auditRows.length
+            ? h('div', { key: 'audit' }, [
+              h('h3', { key: 't' }, `链路审计（最近 ${auditRows.length} 条）`),
+              h('table', { key: 'tbl' }, [TH(['时间', '动作', '反馈', '变更数', '词']), h('tbody', null, auditRows)]),
+            ])
+            : null,
+        ]),
+      ])
+    }
+
+    function DistillTab({ distill, source, error, loading }) {
+      const data = distill || {}
+      const cards = data.cards && typeof data.cards === 'object' ? data.cards : {}
+      const migrations = data.migrations && typeof data.migrations === 'object' ? data.migrations : {}
+      const live = source === 'live'
+      const metric = (value, label, key) => h('div', { className: 'metric', key }, [
+        h('b', { key: 'v' }, asText(value) == null ? '—' : asText(value)),
+        h('span', { key: 'l' }, label),
+      ])
+      const roomRows = objectsOf(cards.byRoom).map((r, i) => h('tr', { key: `r-${i}` }, [
+        h('td', { className: 'mono', key: 'n' }, maskClientPath(r.room)),
+        h('td', { className: 'num', key: 't' }, r.total == null ? '—' : String(r.total)),
+        h('td', { className: 'num', key: 'c' }, r.canonical == null ? '—' : String(r.canonical)),
+        h('td', { className: 'num', key: 'h' }, r.historical == null ? '—' : String(r.historical)),
+        h('td', { className: 'num', key: 'm' }, r.none == null ? '—' : String(r.none)),
+      ]))
+      const histRows = objectsOf(cards.historical).map((c, i) => h('tr', { key: `h-${i}` }, [
+        h('td', { key: 'p' }, h('div', { className: 'mono path' }, maskClientPath(c.path))),
+        h('td', { key: 't' }, maskClientPath(c.title)),
+        h('td', { key: 'l' }, h('span', { className: 'chip mute' }, 'historical')),
+        h('td', { key: 's' }, maskClientPath(c.status)),
+        h('td', { className: 'mono', key: 'sb' }, maskClientPath(c.supersededBy)),
+      ]))
+      const migCards = objectsOf(migrations.items).map((m, i) => h('div', { className: 'card', key: `m-${i}` }, [
+        h('div', { className: 'top', key: 'top' }, [
+          h('span', { className: 'chip solid', key: 'st' }, maskClientPath(m.status) || 'unknown'),
+          h('span', { className: 'chip mono', key: 'id' }, maskClientPath(m.migrationId)),
+          h('span', { className: 'chip mute', key: 'at' }, fmtTime(m.at)),
+        ]),
+        h('div', { className: 'row', key: 'counts' }, [
+          h('span', { className: 'chip', key: 'c' }, `canonical ${m.cards ? m.cards.canonical || 0 : 0}`),
+          h('span', { className: 'chip', key: 'h' }, `historical ${m.cards ? m.cards.historical || 0 : 0}`),
+          h('span', { className: 'chip', key: 'x' }, `extracts ${m.extracts == null ? '—' : m.extracts}`),
+          h('span', { className: 'chip mute', key: 'b' }, `备份 ${m.backupFiles ?? '—'} 文件 / ${fmtBytes(m.backupBytes)}`),
+          m.planSha256 ? h('span', { className: 'chip mono', key: 'sha' }, shortSha(m.planSha256)) : null,
+        ]),
+        h('div', { className: 'snippet' }, objectsOf(m.reasons).slice(0, 4).map((r) => `${maskClientPath(r.rel)} → ${maskClientPath(r.lifecycle)}：${maskClientPath(r.reason)}`).join('\n').slice(0, 600) || '没有可读的降级理由'),
+      ]))
+      return h(React.Fragment, null, [
+        !live && !loading ? h('div', { className: 'notice', key: 'notice' }, '蒸馏接口未接通：这一页没有样例数据。') : null,
+        h('section', { className: 'section', key: 'head' }, [
+          h('h2', null, ['蒸馏（卡生命周期）', h('span', { className: `chip ${live ? 'solid' : 'sample'}`, key: 'tag' }, live ? '实时' : (loading ? '读取中' : '未接通'))]),
+          h('div', { className: 'row', key: 'files' }, [
+            h('span', { className: 'chip mono', key: 'f' }, '卡 frontmatter lifecycle'),
+            h('span', { className: 'chip mono', key: 'm' }, '.longlive/lifecycle-migrations/'),
+          ]),
+          h('div', { className: 'metrics', key: 'm' }, [
+            metric(cards.scanned ?? 0, '扫描卡数', 'scanned'),
+            metric(cards.canonicalTotal ?? 0, 'canonical（现行）', 'canonical'),
+            metric(cards.historicalTotal ?? 0, 'historical（历史）', 'historical'),
+            metric(cards.legacyTotal ?? 0, '未标注 lifecycle', 'legacy'),
+            metric(migrations.dirs ?? 0, '迁移运行', 'migrations'),
+          ]),
+          h('div', { className: 'note', key: 'why' }, '1.8.11 口径：historical 默认不进注入，显式历史查询才放行并标「历史口径」；canonical 排序优先。面板只读，不触发蒸馏/迁移。'),
+        ]),
+        h('section', { className: 'section', key: 'rooms' }, [
+          h('h2', null, '按房间分布'),
+          roomRows.length ? h('table', null, [TH(['房间', '总数', 'canonical', 'historical', '未标注']), h('tbody', null, roomRows)]) : h('div', { className: 'empty' }, '没有扫到卡'),
+        ]),
+        h('section', { className: 'section', key: 'historical' }, [
+          h('h2', null, ['historical 卡', h('span', { className: 'chip', key: 'n' }, `${cards.historicalTotal ?? 0}`)]),
+          histRows.length ? h('table', null, [TH(['卡路径', '标题', 'lifecycle', 'status', 'superseded_by']), h('tbody', null, histRows)]) : h('div', { className: 'empty' }, '没有 historical 卡（迁移还没跑或全部现行）'),
+        ]),
+        h('section', { className: 'section', key: 'migrations' }, [
+          h('h2', null, ['迁移运行记录', h('span', { className: 'chip mute', key: 'n' }, '只读：manifest + 备份统计')]),
+          migCards.length ? h('div', { className: 'grid' }, migCards) : h('div', { className: 'empty' }, '没有迁移运行记录（.longlive/lifecycle-migrations/ 为空）'),
+        ]),
+      ])
+    }
+
+    // ------------------------------------------------------------------
     // 使用说明（第七页签）
     // 纯静态文案：不取接口、不写文件、不发请求；术语第一次出现给一句人话解释，
     // 让第一次用插件的人能照着做完，不必先读源码。
@@ -1343,7 +1693,8 @@ window.__ModuleLoader__.load({
         h('section', { className: 'section help', key: 'what' }, [
           h('h2', null, '使用说明（潜望镜 · 久视 longlive 面板）'),
           P('p1', '只读优先的记忆治理面板：读 27 条 longlive 只读路由，执行 18 个受控动作（需宿主令牌）。'),
-          P('p2', '7 个 v2 页签：记忆 / 回忆 / 遗忘 / 断言-证据 / 冲突 / 审计 / 角色；另有 7 个遗留只读页签。'),
+          P('p2', '7 个 v2 页签：记忆 / 回忆 / 遗忘 / 断言-证据 / 冲突 / 审计 / 角色；另有 9 个遗留只读页签（含 1.8.2 新增的「网络」「蒸馏」）。'),
+          P('p3', '1.8.2 上屏：记忆网络（edges）、蒸馏（canonical/historical + 迁移记录）、强制召回/链路学习/归档兜底、24h 活动窗、自动截断新阈值口径；并修复 longlive 1.8.12 改名后面板 v2 面脱钩。'),
         ]),
         h('section', { className: 'section help', key: 'perm' }, [
           h('h2', null, '权限与安全边界'),
@@ -1365,6 +1716,9 @@ window.__ModuleLoader__.load({
             item('冲突', '#21 冲突列表与 conflict.arbitrate（preferA/preferB/both/disputed）。仲裁 ≠ 验证：只记录人工取舍，不证明真假。', 'v5'),
             item('审计', '四指标（错答率/弃答率/覆盖率/幻觉率）只供数；判定归 answer-guard/Gate-3。questionId 缺失显示 unknown；导出在客户端做白名单字段 NDJSON，不做服务端导出。', 'v6'),
             item('角色', '#24 attention / #25 relationships（tier 权重来自响应级 tierWeights + version/CAS）/ #26 personality（retentionBias 对象）/ #27 channels（只读注册，协议 1.8.1+）。', 'v7'),
+            item('网络', 'edges（8 类关系边，1.8.11）+ links（词→卡学习链路，1.8.8）+ 链路审计；文件缺失显示空态，不拿样例顶班。', 'v8'),
+            item('蒸馏', '卡 lifecycle canonical/historical（1.8.11）+ 迁移运行记录；面板只读，不触发蒸馏/迁移。', 'v9'),
+            item('活动窗', '六层视图里的「活动窗（近 24h）」按 1.8.8 时间窗口径统计当前活动板，旧行在 activity-YYYYMM.jsonl。', 'v10'),
           ]),
         ]),
         h('section', { className: 'section help', key: 'degraded' }, [
@@ -1397,6 +1751,9 @@ window.__ModuleLoader__.load({
       const [shadowRes] = useRemote('/shadow?limit=20', true)
       const [routerRes, refreshRouter] = useRemote('/router', true)
       const [recallRes, refreshRecall] = useRemote('/recall?limit=20', true)
+      const [networkRes, refreshNetwork] = useRemote('/network?limit=30', true)
+      const [distillRes, refreshDistill] = useRemote('/distill', true)
+      const [systemRes, refreshSystem] = useRemote('/system', true)
       const [v2StateRes, refreshV2State] = useRemote('/v2/state', true)
       const [refreshing, setRefreshing] = useState(false)
       // P1-1：同源页面从 /v2/state 取 per-session CSRF；跨源读不到，POST 缺它必 403。
@@ -1413,8 +1770,11 @@ window.__ModuleLoader__.load({
         shadow: withPreview(shadowRes.data, SAMPLE.shadow),
         router: routerRes.data || SAMPLE.router,
         recall: recallRes.data || null,
+        network: networkRes.data || null,
+        distill: distillRes.data || null,
+        system: systemRes.data || null,
         v2state: v2StateRes.data || null,
-      }), [summary, truncRes.data, filterRes.data, shadowRes.data, routerRes.data, recallRes.data, v2StateRes.data])
+      }), [summary, truncRes.data, filterRes.data, shadowRes.data, routerRes.data, recallRes.data, networkRes.data, distillRes.data, systemRes.data, v2StateRes.data])
 
       const counts = {
         palace: view.summary.totals ? view.summary.totals.cards : (view.summary.layers || []).length,
@@ -1424,6 +1784,8 @@ window.__ModuleLoader__.load({
         // 页签角标 = status.queue.pending（协议口径；proposals 文件里的 pending 只是目录扫描结果）。
         router: (((view.router.status || {}).queue || {}).pending) ?? 0,
         recall: (view.recall && view.recall.items ? view.recall.items.length : 0),
+        network: (view.network && view.network.edges ? view.network.edges.total || 0 : 0),
+        distill: (view.distill && view.distill.cards ? view.distill.cards.historicalTotal || 0 : 0),
         v2memory: null,
         v2recall: null,
         v2forget: null,
@@ -1434,8 +1796,8 @@ window.__ModuleLoader__.load({
         help: null,
       }
 
-      const errors = [summaryRes.error, truncRes.error, filterRes.error, shadowRes.error, routerRes.error, recallRes.error, v2StateRes.error].filter(Boolean)
-      const anyLive = summaryLive || Boolean(truncRes.data) || Boolean(filterRes.data) || Boolean(shadowRes.data) || Boolean(routerRes.data) || Boolean(recallRes.data)
+      const errors = [summaryRes.error, truncRes.error, filterRes.error, shadowRes.error, routerRes.error, recallRes.error, networkRes.error, distillRes.error, systemRes.error, v2StateRes.error].filter(Boolean)
+      const anyLive = summaryLive || Boolean(truncRes.data) || Boolean(filterRes.data) || Boolean(shadowRes.data) || Boolean(routerRes.data) || Boolean(recallRes.data) || Boolean(networkRes.data) || Boolean(distillRes.data) || Boolean(systemRes.data)
 
       const onRefresh = useCallback(async () => {
         setRefreshing(true)
@@ -1443,9 +1805,12 @@ window.__ModuleLoader__.load({
         refreshTrunc()
         refreshRouter()
         refreshRecall()
+        refreshNetwork()
+        refreshDistill()
+        refreshSystem()
         refreshV2State()
         setRefreshing(false)
-      }, [refreshSummary, refreshTrunc, refreshRouter, refreshRecall, refreshV2State])
+      }, [refreshSummary, refreshTrunc, refreshRouter, refreshRecall, refreshNetwork, refreshDistill, refreshSystem, refreshV2State])
 
       return h('div', { className: 'llp', 'data-main': 'true' },
         h('header', null,
@@ -1453,7 +1818,7 @@ window.__ModuleLoader__.load({
             h('h1', null, PANEL_LABEL),
             h('div', { className: 'sub' },
               h('span', null, '只读优先 · 动作走宿主令牌'),
-              view.summary.root ? h('span', { className: 'mono' }, view.summary.root) : null,
+              view.summary.root ? h('span', { className: 'mono' }, maskRootPath(view.summary.root)) : null,
               h('span', { className: `chip ${anyLive ? 'solid' : 'sample'}` }, anyLive ? '接口已接通' : '样例数据'),
               view.v2state && view.v2state.bridge && view.v2state.bridge.available
                 ? h('span', { className: 'chip solid' }, 'v2 接口已接通')
@@ -1489,12 +1854,14 @@ window.__ModuleLoader__.load({
             tab === 'v2conflicts' ? h(ConflictTab, { v2state: view.v2state }) : null,
             tab === 'v2audit' ? h(AuditTab, { v2state: view.v2state }) : null,
             tab === 'v2role' ? h(RoleTab, { v2state: view.v2state }) : null,
-            tab === 'palace' ? h(PalaceTab, { summary: view.summary, source: summaryLive ? 'live' : 'sample' }) : null,
-            tab === 'trunc' ? h(TruncTab, { trunc: view.trunc, source: truncRes.data ? 'live' : 'sample' }) : null,
+            tab === 'palace' ? h(PalaceTab, { summary: view.summary, source: summaryLive ? 'live' : 'sample', extras: view.system && view.system.activityWindow }) : null,
+            tab === 'trunc' ? h(TruncTab, { trunc: view.trunc, source: truncRes.data ? 'live' : 'sample', extras: view.system && view.system.autoTruncate }) : null,
             tab === 'filter' ? h(FilterTab, { filter: view.filter, source: filterRes.data ? 'live' : 'sample' }) : null,
             tab === 'shadow' ? h(ShadowTab, { shadow: view.shadow, source: shadowRes.data ? 'live' : 'sample' }) : null,
             tab === 'router' ? h(RouterTab, { router: view.router, source: routerRes.data ? 'live' : 'sample' }) : null,
-            tab === 'recall' ? h(RecallTab, { recall: view.recall, source: recallRes.data ? 'live' : 'sample', error: recallRes.error, loading: recallRes.loading }) : null,
+            tab === 'recall' ? h(RecallTab, { recall: view.recall, source: recallRes.data ? 'live' : 'sample', error: recallRes.error, loading: recallRes.loading, extras: view.system && view.system.recallForced }) : null,
+            tab === 'network' ? h(NetworkTab, { network: view.network, source: networkRes.data ? 'live' : 'sample', error: networkRes.error, loading: networkRes.loading }) : null,
+            tab === 'distill' ? h(DistillTab, { distill: view.distill, source: distillRes.data ? 'live' : 'sample', error: distillRes.error, loading: distillRes.loading }) : null,
             tab === 'help' ? h(HelpTab, null) : null),
           h('div', { className: 'foot' },
             h('span', null, '只读优先 · 18 个受控动作经宿主令牌（27 条只读路由；本页不存 token/凭据）'),
@@ -2792,7 +3159,7 @@ window.__ModuleLoader__.load({
       fmtBytes, fmtAge, fmtTime, shortSha, sortLiveRows, liveStateRank, liveAgeMs, stateLabel, stateTone, TABS, SAMPLE,
       V2_TABS, V2_ACTIONS, V2_MATRIX, V2_BUTTON_ACTION, V2_BUTTON_LABEL, V2_REL_WEIGHT, v2ButtonsFor, v2ReviewRow, v2FormatError, v2LockedOf,
       components: {
-        Panel, PalaceTab, ArchivedFold, TruncTab, FilterTab, ShadowTab, RouterTab, RecallTab, HelpTab,
+        Panel, PalaceTab, ArchivedFold, TruncTab, FilterTab, ShadowTab, RouterTab, RecallTab, NetworkTab, DistillTab, HelpTab,
         V2IntegrityBanner, V2ActionDialog, V2ReviewTable, MemoryBoardTab, RecallFlowTab, ForgetTab, RecordsTab, WorkingFrameCard,
         ClaimsChainCard, BankTrustCard, FramesCard, ConflictTab, AuditTab, RoleTab, V2Field, V2Memo,
       },

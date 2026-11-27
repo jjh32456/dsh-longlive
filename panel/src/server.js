@@ -21,6 +21,9 @@
  *   GET /api/longlive-panel/shadow?limit=20&source=&action=&reveal=1
  *   GET /api/longlive-panel/router
  *   GET /api/longlive-panel/recall?limit=20
+ *   GET /api/longlive-panel/network?limit=30&type=   （1.8.2：edges/links/links-audit）
+ *   GET /api/longlive-panel/distill                  （1.8.2：lifecycle/迁移）
+ *   GET /api/longlive-panel/system                   （1.8.2：自动截断/强制召回/活动窗）
  *
  * 1.8.0（v2.8）：只读路由 27 条、动作面 18 个契约名（v2-core 为准）。
  *
@@ -58,6 +61,8 @@ import {
   validateArchiveTarget,
   validateMergeTarget,
 } from './v2-core.js'
+// 1.8.2：longlive 1.8.7–1.8.12 新数据的只读视图（网络 / 蒸馏 / 系统增强）。
+import { buildDistill, buildNetwork, buildSystemExtras } from './extras.js'
 
 /**
  * 版本号的唯一权威是 package.json（运行时从包根读取，禁止手写常量）。
@@ -2465,7 +2470,7 @@ async function buildRouter(cfg) {
 // 路由
 // ---------------------------------------------------------------------------
 
-export const ROUTES = ['summary', 'cards', 'card', 'truncations', 'filter', 'shadow', 'router', 'recall']
+export const ROUTES = ['summary', 'cards', 'card', 'truncations', 'filter', 'shadow', 'router', 'recall', 'network', 'distill', 'system']
 
 /**
  * memoryRoot 默认值：与 dsh-session-longlive 本体一致，走标准位置 ~/.dsh/longlive-memory。
@@ -2661,6 +2666,18 @@ export function createPanel(overrides = {}) {
           return await buildRouter(cfg)
         case 'recall':
           return await buildRecall(cfg, query)
+        case 'network': {
+          const body = await buildNetwork(cfg.memoryRoot, query)
+          return { status: 200, headers: {}, body }
+        }
+        case 'distill': {
+          const body = await buildDistill(cfg.memoryRoot)
+          return { status: 200, headers: {}, body }
+        }
+        case 'system': {
+          const body = await buildSystemExtras(cfg.memoryRoot)
+          return { status: 200, headers: {}, body }
+        }
         default:
           throw new PanelError('E_NOT_FOUND', `未知接口：${route}`, String(route))
       }

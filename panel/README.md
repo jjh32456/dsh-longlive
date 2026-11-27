@@ -7,17 +7,30 @@ DSH（DeepSeek Harness）的 **longlive 只读面板**（潜望镜）：在 Web 
 1.8.1 新增：`GET /api/longlive-panel/summary` 的**可选只读** `autoProcedure` 块（自动经验候选的
 运行态/计数/候选清单）；默认关闭时只有 `{enabled:false}`，不 stat、不读 staging。
 
+1.8.2 新增：
+- **改名修复**：longlive 1.8.12 把 npm 包名改为 `@jjh32456/longlive`；面板 v2 兜底加载先认新名、
+  再认旧名，不再出现「面板脱钩 / v2 未实装」。
+- **新页签「网络」**：edges（1.8.11，8 类关系边：supersedes / superseded_by / deprecated_by /
+  conflicts_with / answers_with / derived_from / mentions / same_topic）+ links（1.8.8 词→卡学习链路，
+  seed/learned 分布、权重 Top、最近学习、链路审计）。
+- **新页签「蒸馏」**：卡 `lifecycle: canonical|historical`（1.8.11）计数与清单、迁移运行记录
+  （`.longlive/lifecycle-migrations/`，只给相对路径与计数）。
+- **本轮想起**追加「强制召回与链路」（1.8.8：forced / user-task / link 命中 / 归档兜底）；
+  **截断记录**追加「自动截断口径」（1.8.10：12M token 外部日志阈值与 350k 上下文线解耦、infeasible 原因）；
+  **六层视图**追加「活动窗（近 24h）」（1.8.8：先按时间、后按行数护栏）。
+
 - 只读展示 + **受控动作**：动作只走 longlive M2-G 的 18 个契约动作名，宿主签发一次性能力令牌；
   面板不持有凭据、不直连 SQLite、不写记忆正文。
-- 依赖：`@jjh32456/dsh-longlive`（peerDependencies `^1.8.0`）。`autoProcedure` 块的数据由
-  longlive **1.8.6+** 写入；装在 1.8.5 上时该块自然为 `enabled:false`，其余功能不变。
+- 依赖：`@jjh32456/longlive`（peerDependencies `^1.8.12`；旧包名 `@jjh32456/dsh-longlive` 已删除，
+  仅作为旧安装的兜底解析保留）。`autoProcedure` 块的数据由 longlive **1.8.6+** 写入；
+  装在 1.8.5 上时该块自然为 `enabled:false`，其余功能不变。
 - Node：`>= 22.13.0`（用宿主运行时）。
 
 ## 安装
 
 ```bash
-dsh plugin add @jjh32456/dsh-longlive@1.8.6
-dsh plugin add @jjh32456/dsh-longlive-panel@1.8.1
+dsh plugin add @jjh32456/longlive@1.8.12
+dsh plugin add @jjh32456/dsh-longlive-panel@1.8.2
 ```
 
 重启宿主后侧栏出现「潜望镜」。完整步骤、配置、kill switch、验证与卸载见

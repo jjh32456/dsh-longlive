@@ -1,20 +1,23 @@
 # 安装 · @jjh32456/dsh-longlive-panel
 
-> 第三方通用版（1.8.1）。本文只写可复制的通用命令，不含任何本机绝对路径或用户名。
-> 面板依赖 longlive；两件按同一条发布线（1.8.x）安装，1.8.1 的 `autoProcedure` 块需要 longlive 1.8.6+。
+> 第三方通用版（1.8.2）。本文只写可复制的通用命令，不含任何本机绝对路径或用户名。
+> 面板依赖 longlive；两件按同一条发布线（1.8.x）安装。1.8.2 跟随 longlive 1.8.12 的包名改名
+> （`@jjh32456/longlive`），并上屏 1.8.7–1.8.12 的新功能：记忆网络、蒸馏（canonical/historical）、
+> 强制召回/链路学习/归档兜底、24h 活动窗、自动截断新阈值口径。
 
 ## 0. 它是什么
 
 | 项 | 值 |
 |---|---|
 | 包名 | `@jjh32456/dsh-longlive-panel` |
-| 版本 | 1.8.1 |
+| 版本 | 1.8.2 |
 | 类型 | Cordis 插件（宿主侧 `webServer` 路由 + Web 客户端 bundle） |
-| 入口 | `src/server.js`（宿主）、`src/client.js`（浏览器） |
-| 路由基址 | `/api/longlive-panel`（旧只读面）；`/api/longlive-panel/v2/*`（1.8.0 全视图） |
+| 入口 | `src/server.js`（宿主）、`src/client.js`（浏览器）、`src/extras.js`（1.8.2 只读扩展视图） |
+| 路由基址 | `/api/longlive-panel`（旧只读面 + 1.8.2 新增 network/distill/system）；`/api/longlive-panel/v2/*`（1.8.0 全视图） |
 | Node | `>= 22.13.0`（运行时用宿主提供的 Node：`process.execPath` / `DSH_NODE`；不依赖固定安装路径） |
-| 面板入口 | 侧栏「潜望镜」：旧 7 页签 + 1.8.0 视图（记忆/回忆/遗忘/断言-证据/冲突/审计/角色） |
+| 面板入口 | 侧栏「潜望镜」：旧 9 页签（含 1.8.2 网络/蒸馏）+ 1.8.0 视图（记忆/回忆/遗忘/断言-证据/冲突/审计/角色） |
 | summary 契约 | `panelApiVersion=2`（1.8.1 起）；新增可选只读 `autoProcedure` 块 |
+| 依赖名 | `@jjh32456/longlive`（1.8.12 起的新包名；旧名 `@jjh32456/dsh-longlive` 仅作兜底兼容） |
 
 **定位**：只读展示为主；判定动作严格走 longlive 的 M2-G 受控动作面（18 个契约动作名，宿主签发一次性能力令牌）。
 面板本身不落盘凭据、不直连 SQLite、不写记忆正文。
@@ -23,8 +26,8 @@
 
 - 一个 **web 形态**的 DSH profile（`webServer` 服务只在 web 形态存在；非 web profile 不会激活 `inject: ['webServer']`）。
 - Node `>= 22.13.0`：运行时由宿主提供（`process.execPath` 或 `DSH_NODE` 显式注入）；`dsh` 命令与自测脚本用它执行，不写死安装路径。
-- longlive 1.8.6（含 autoProcedure 数据面）与面板 1.8.1 同时安装；面板通过 peerDependencies
-  `^1.8.0` 声明对 longlive 的依赖（1.8.5 也能装，只是 summary 的 `autoProcedure` 块恒为 `enabled:false`）。
+- longlive 1.8.12（npm 新包名 `@jjh32456/longlive`）与面板 1.8.2 同时安装；面板通过 peerDependencies
+  `@jjh32456/longlive ^1.8.12` 声明对 longlive 的依赖（旧包名已删除，不能再装）。
 
 ## 2. 安装（第三方用户步骤）
 
@@ -32,10 +35,10 @@
 
 ```bash
 # 1) longlive（核心 + 面板后端 API + answer-guard + autoProcedure 数据面）
-dsh plugin add @jjh32456/dsh-longlive@1.8.6
+dsh plugin add @jjh32456/longlive@1.8.12
 
 # 2) panel（本包）
-dsh plugin add @jjh32456/dsh-longlive-panel@1.8.1
+dsh plugin add @jjh32456/dsh-longlive-panel@1.8.2
 ```
 
 - 两件保持同一条发布线（1.8.x）；混装会返回 `E_VERSION_SET`（契约 §16.6）。
@@ -76,6 +79,11 @@ dsh plugin add @jjh32456/dsh-longlive-panel@1.8.1
 3. 路由自检（把 `<host>` 换成你的 Web UI 地址）：
    - `GET <host>/api/longlive-panel/summary` → 200 JSON（旧只读面）；响应含 `panelApiVersion: 2`
      与 `autoProcedure`（longlive 未开启自动经验时为 `{ "enabled": false }`）
+   - `GET <host>/api/longlive-panel/network?limit=5` → 200，含 `edges`（边总数/类型分布/明细）与 `links`（词→卡链路）
+   - `GET <host>/api/longlive-panel/distill` → 200，含 `cards.byLifecycle`（canonical/historical）与
+     `migrations`（迁移运行记录，只给相对路径与计数）
+   - `GET <host>/api/longlive-panel/system` → 200，含 `autoTruncate`（1.8.10 阈值口径）、
+     `recallForced`（1.8.8 强制召回/链路/归档兜底）、`activityWindow`（1.8.8 近 24h 活动窗）
    - `GET <host>/api/longlive-panel/v2/state` → 200，含 `routes`（27 条）、`actions`（18 个）、`csrfToken`（per-session）
 4. 每个视图在无数据时显示空态（不是样例、不是崩溃）；longlive 未开启 `memoryV2` 时显示「未实装」。
 5. 只读面自检：summary 前后 `.longlive/` 文件不应有新增/改动；默认关时面板不读
@@ -95,6 +103,9 @@ node activation-probe.mjs           # 安装态激活探针（22 项；临时 DS
 `clean-env-smoke.mjs` / `activation-probe.mjs` 只用临时目录，不碰真实 `$DSH_HOME`、不装插件、不联网；
 找不到 longlive API 时显式 SKIP（不冒充通过）。隔离源树里用环境变量 `DSH_LONGLIVE_SRC=<longlive 包根>`
 指向 longlive 源树；`auto-procedure.test.mjs` 的 1.8.0 逐字节基线用 `PANEL_180_SRC=<1.8.0 面板包根>`。
+
+1.8.2 新增的只读扩展视图测试放在面板仓库 `tests/`（fixture + extras + 路由 + 客户端渲染 smoke，
+`node --test tests/*.test.mjs`）：全部使用临时 fixture 目录，不碰真实记忆库。
 
 ### 5.1 Gate-2 面板门槛（维护者；longlive 仓库内执行）
 
@@ -126,7 +137,11 @@ node self-test.mjs && node --test gap-fixes.test.mjs && node --test auto-procedu
 ## 7. 安全边界（读者须知）
 
 - 面板 server 不是信任边界：凭据只在长活宿主进程内存，能力令牌按请求现签、短 TTL、一次性 nonce，不落盘、不进浏览器；浏览器只有同源页面可读的 per-session CSRF。
-- 面板不直连 SQLite、不读 `.longlive/` 白名单之外的文件；唯一例外是 1.8.1 为 summary 只读的候选 sidecar
-  目录 `.longlive/staging/auto-cards/procedures/*.meta.json`（只认普通文件、slug 白名单、≤20 条/单文件
-  ≤256 KiB/总 ≤1 MiB、非递归、拒符号链接；候选 `.md` 正文永不读取）。新增字段必须先有生产者。
+- 面板不直连 SQLite、不读 `.longlive/` 白名单之外的文件；已知只读来源：
+  summary 的候选 sidecar 目录 `.longlive/staging/auto-cards/procedures/*.meta.json`（只认普通文件、slug 白名单、
+  ≤20 条/单文件 ≤256 KiB/总 ≤1 MiB、非递归、拒符号链接；候选 `.md` 正文永不读取）；
+  1.8.2 的 network/distill/system 读取 `.longlive/recall/edges.jsonl`、`links.jsonl`、`links-audit.jsonl`、
+  `recall-log.jsonl`（只读尾部 ≤2 MiB / ≤5000 行）、`board/activity*.jsonl`、`auto-truncate-status.json`、
+  `lifecycle-migrations/*/manifest.json` 与卡 frontmatter——全部只读、绝对路径脱敏、坏行计数不崩。
+  新增字段必须先有生产者。
 - 动作面只允许 longlive G7 的 18 个契约动作名；panel 侧不发明动作名。

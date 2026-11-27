@@ -184,14 +184,24 @@ export function createLongliveBridge(options = {}) {
 
 /**
  * Fallback loader: import longlive's panel-api from the installed package.
- * Never throws; returns null when the package is absent/unresolvable.
+ * 1.8.12 起包名为 @jjh32456/longlive；旧名 @jjh32456/dsh-longlive 保留作次级兜底
+ * （兼容改名前的安装）。Never throws; returns null when the package is absent.
  */
 let defaultLoaderInFlight = null
 export async function loadDefaultLongliveApi(memoryRoot) {
   if (defaultLoaderInFlight) return defaultLoaderInFlight
   defaultLoaderInFlight = (async () => {
     try {
-      const entry = await import.meta.resolve('@jjh32456/dsh-longlive')
+      let entry = null
+      for (const specifier of ['@jjh32456/longlive', '@jjh32456/dsh-longlive']) {
+        try {
+          entry = await import.meta.resolve(specifier)
+          break
+        } catch {
+          continue
+        }
+      }
+      if (!entry) return null
       const srcDir = dirname(fileURLToPath(entry))
       const panelApiHref = pathToFileURL(join(srcDir, 'ui', 'panel-api.js')).href
       const mod = await import(panelApiHref)
